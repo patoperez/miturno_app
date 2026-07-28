@@ -1,0 +1,106 @@
+{
+  "routines": [
+    {
+      "name": "Push A",
+      "days": ["lunes"],
+      "exercises": [
+        { "name": "Press pecho en Smith (banca inclinada)", "sets": 4, "reps": "8-10", "rest": 120, "weight": "", "note": "Pesado. Deja 1-2 reps en reserva." },
+        { "name": "Press mancuerna plano", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "Estira abajo" },
+        { "name": "Aperturas en pec-deck (máquina)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Aprieta" },
+        { "name": "Press hombro mancuerna (unilateral)", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "1 brazo a la vez" },
+        { "name": "Elevaciones laterales (mancuerna)", "sets": 4, "reps": "12-15", "rest": 45, "weight": "", "note": "Hombro 3D" },
+        { "name": "Extensión tríceps en polea (cuerda)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "" },
+        { "name": "Press francés mancuerna o fondos máquina", "sets": 3, "reps": "10-12", "rest": 60, "weight": "", "note": "" },
+        { "name": "Elevación de talón de pie (pantorrilla)", "sets": 4, "reps": "12-15", "rest": 45, "weight": "", "note": "Rango completo, lento. Pausa 1 s arriba y abajo." }
+      ]
+    },
+    {
+      "name": "Pull A",
+      "days": ["martes"],
+      "exercises": [
+        { "name": "Dominadas (asistidas si hace falta)", "sets": 4, "reps": "Máx / 6-10", "rest": 120, "weight": "", "note": "Tu innegociable" },
+        { "name": "Jalón al pecho (polea, agarre amplio)", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
+        { "name": "Remo sentado en polea (unilateral)", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "1 brazo" },
+        { "name": "Remo en máquina (apoyado)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Aprieta escápulas" },
+        { "name": "Curl bíceps mancuerna alterno", "sets": 3, "reps": "10-12", "rest": 60, "weight": "", "note": "Unilateral" },
+        { "name": "Curl martillo (mancuerna)", "sets": 3, "reps": "12-15", "rest": 45, "weight": "", "note": "Antebrazo + braquial" },
+        { "name": "Curl de muñeca (mancuerna/barra)", "sets": 3, "reps": "15-20", "rest": 45, "weight": "", "note": "Antebrazo" }
+      ]
+    },
+    {
+      "name": "Legs A (cuádriceps)",
+      "days": ["miércoles"],
+      "exercises": [
+        { "name": "Sentadilla búlgara en Smith", "sets": 4, "reps": "8-10 c/pierna", "rest": 120, "weight": "", "note": "Tu innegociable. Unilateral." },
+        { "name": "Prensa de pierna", "sets": 4, "reps": "10-12", "rest": 120, "weight": "", "note": "Pesado" },
+        { "name": "Hack squat o sentadilla en Smith", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
+        { "name": "Extensión de cuádriceps (máquina)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Aprieta arriba" },
+        { "name": "Elevación de talón de pie (pantorrilla)", "sets": 5, "reps": "12-15", "rest": 45, "weight": "", "note": "Rango completo, lento" },
+        { "name": "Elevación de talón sentado (pantorrilla)", "sets": 4, "reps": "15-20", "rest": 45, "weight": "", "note": "Pausa abajo" }
+      ]
+    },
+    {
+      "name": "Push B",
+      "days": ["jueves"],
+      "exercises": [
+        { "name": "Press hombro en Smith (sentado)", "sets": 4, "reps": "8-10", "rest": 120, "weight": "", "note": "Pesado" },
+        { "name": "Press pecho inclinado mancuerna", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
+        { "name": "Press de pecho en máquina", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "" },
+        { "name": "Elevaciones laterales en polea (unilateral)", "sets": 4, "reps": "12-15", "rest": 45, "weight": "", "note": "1 brazo" },
+        { "name": "Pájaros / posterior en pec-deck invertido", "sets": 3, "reps": "15-20", "rest": 45, "weight": "", "note": "Hombro posterior" },
+        { "name": "Extensión tríceps por encima cabeza (polea)", "sets": 3, "reps": "10-12", "rest": 60, "weight": "", "note": "Estira" },
+        { "name": "Jalón tríceps en polea (barra)", "sets": 3, "reps": "12-15", "rest": 45, "weight": "", "note": "" },
+        { "name": "Elevación de talón sentado (pantorrilla)", "sets": 4, "reps": "15-20", "rest": 45, "weight": "", "note": "4.ª sesión de pantorrilla de la semana" }
+      ]
+    },
+    {
+      "name": "Pull B",
+      "days": ["viernes"],
+      "exercises": [
+        { "name": "Dominadas agarre neutro/supino", "sets": 4, "reps": "Máx / 6-10", "rest": 120, "weight": "", "note": "Tu innegociable" },
+        { "name": "Remo en máquina pesado", "sets": 4, "reps": "8-10", "rest": 120, "weight": "", "note": "Grosor" },
+        { "name": "Jalón al pecho agarre cerrado", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
+        { "name": "Pullover en polea", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Dorsal" },
+        { "name": "Curl predicador en máquina", "sets": 3, "reps": "10-12", "rest": 60, "weight": "", "note": "" },
+        { "name": "Curl inverso (antebrazo)", "sets": 3, "reps": "12-15", "rest": 45, "weight": "", "note": "Antebrazo" },
+        { "name": "Caminata del granjero con mancuernas", "sets": 3, "reps": "30-40 m", "rest": 60, "weight": "", "note": "Agarre / antebrazo" }
+      ]
+    },
+    {
+      "name": "Legs B (femoral/glúteo)",
+      "days": ["sábado"],
+      "exercises": [
+        { "name": "Peso muerto rumano con mancuernas", "sets": 4, "reps": "10-12", "rest": 120, "weight": "", "note": "Femoral, estira" },
+        { "name": "Curl femoral tumbado o sentado (máquina)", "sets": 4, "reps": "12-15", "rest": 90, "weight": "", "note": "" },
+        { "name": "Zancadas caminando con mancuernas", "sets": 3, "reps": "10-12 c/pierna", "rest": 90, "weight": "", "note": "Unilateral" },
+        { "name": "Hip thrust en Smith o máquina glúteo", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "Glúteo" },
+        { "name": "Elevación de talón en prensa (pantorrilla)", "sets": 5, "reps": "12-15", "rest": 45, "weight": "", "note": "Rango completo" },
+        { "name": "Elevación de talón sentado (pantorrilla)", "sets": 4, "reps": "15-20", "rest": 45, "weight": "", "note": "Pausa arriba 1 s" }
+      ]
+    },
+    {
+      "name": "Cuello (hipertrofia)",
+      "days": [],
+      "exercises": [
+        { "name": "Flexión de cuello (mentón al pecho)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Boca arriba, cabeza fuera de la banca, sube lento. Sin peso las primeras 2 semanas. Tempo 2-1-3." },
+        { "name": "Extensión de cuello (mirar arriba)", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "Boca abajo, cabeza fuera, sube lento. Control total." },
+        { "name": "Lateral derecho", "sets": 2, "reps": "12-15", "rest": 60, "weight": "", "note": "De lado, oreja hacia el hombro, sube lento." },
+        { "name": "Lateral izquierdo", "sets": 2, "reps": "12-15", "rest": 60, "weight": "", "note": "Igual, del otro lado. Termina con estiramiento suave en 4 direcciones." }
+      ]
+    },
+    {
+      "name": "Calentamiento (pre-entreno)",
+      "days": [],
+      "exercises": [
+        { "name": "Colgarse de la barra (dead hang)", "sets": 2, "reps": "máx tiempo", "rest": 30, "weight": "", "note": "Hombros activos, respira. Descomprime columna y calienta agarre." },
+        { "name": "Cardio de entrada", "sets": 1, "reps": "5 min suave", "rest": 0, "weight": "", "note": "Caminadora/elíptica/bici. Sudar ligero, no cansarte." },
+        { "name": "Círculos de brazos", "sets": 1, "reps": "10 c/dirección", "rest": 0, "weight": "", "note": "Adelante y atrás" },
+        { "name": "Rotaciones de cadera de pie", "sets": 1, "reps": "10 c/lado", "rest": 0, "weight": "", "note": "" },
+        { "name": "Balanceo de piernas (frente y lateral)", "sets": 1, "reps": "10 c/pierna", "rest": 0, "weight": "", "note": "" },
+        { "name": "Sentadilla profunda sin peso", "sets": 1, "reps": "8 (mantener 2 s)", "rest": 0, "weight": "", "note": "" },
+        { "name": "Gato-camello / rotación torácica", "sets": 1, "reps": "8", "rest": 0, "weight": "", "note": "" },
+        { "name": "Series de aproximación", "sets": 2, "reps": "50% y 70%", "rest": 60, "weight": "", "note": "En el 1.er ejercicio pesado del día. No cuentan como series de trabajo." }
+      ]
+    }
+  ]
+}

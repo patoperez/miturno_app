@@ -1,0 +1,280 @@
+/* =====================================================================
+   styles.css  ·  Mi Turno
+   Base minimalista y sobria; el color como lenguaje de cada identidad.
+===================================================================== */
+:root{
+  --bg:#0E0F13; --card:#16181F; --card2:#1D2029; --line:#262A35;
+  --text:#E7E9EE; --muted:#8A8F9C; --muted2:#5B6070;
+  --cuerpo:#FF5A3C; --ingresos:#10B981; --ciber:#3B82F6;
+  --productividad:#8B5CF6; --lectura:#F59E0B; --ok:#22C55E; --bad:#EF4444;
+  --radius:18px;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:16px; line-height:1.4; overscroll-behavior:none;
+  padding-bottom:90px; max-width:520px; margin:0 auto;
+  -webkit-font-smoothing:antialiased;
+}
+.app{padding:calc(env(safe-area-inset-top) + 20px) 18px 18px;}
+.icon{width:20px; height:20px; flex:none;}
+.icon path{fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+
+/* ---------- Header ---------- */
+.hd{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;}
+.hd .greet{font-size:13px; color:var(--muted); letter-spacing:.3px;}
+.hd .date{font-size:22px; font-weight:700; margin-top:2px; text-transform:capitalize;}
+.ring{position:relative; width:62px; height:62px; flex:none;}
+.ring svg{transform:rotate(-90deg);}
+.ring .val{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700;}
+
+/* ---------- Section ---------- */
+.sec{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:14px; overflow:hidden;}
+.sec-h{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; cursor:pointer; user-select:none;}
+.sec-h .t{display:flex; align-items:center; gap:10px; font-weight:650; font-size:15px;}
+.sec-h .t .icon{width:17px; height:17px;}
+.sec-h .meta{font-size:13px; color:var(--muted); display:flex; align-items:center; gap:10px;}
+.sec-h .chev{transition:transform .2s ease; color:var(--muted2); display:flex;}
+.sec-h .chev .icon{width:16px; height:16px;}
+.sec.collapsed .chev{transform:rotate(-90deg);}
+.sec.collapsed .sec-b{display:none;}
+.sec-b{padding:2px 12px 12px;}
+
+/* ---------- Rows ---------- */
+.row{display:flex; align-items:center; gap:12px; padding:11px 8px; border-radius:12px; transition:background .15s;}
+.row:active{background:var(--card2);}
+.mark{
+  width:26px; height:26px; border-radius:9px; border:2px solid var(--line);
+  flex:none; display:flex; align-items:center; justify-content:center;
+  transition:all .18s cubic-bezier(.34,1.56,.64,1); background:transparent; cursor:pointer;
+}
+.mark .icon{width:15px; height:15px; opacity:0; transform:scale(.4); transition:all .18s;}
+.mark .icon path{stroke:#0E0F13; stroke-width:3.5;}
+.row.done .mark .icon{opacity:1; transform:scale(1);}
+.row .idi{width:26px; height:26px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center;}
+.row .idi .icon{width:15px; height:15px;}
+.row .body{flex:1; min-width:0; cursor:pointer;}
+.row .name{font-size:15px; font-weight:550;}
+.row.done .name{color:var(--muted);}
+.row .sub{font-size:12px; color:var(--muted); margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.note-btn{font-size:12px; color:var(--muted2); padding:5px; border-radius:8px; border:1px solid var(--line); background:transparent; cursor:pointer; display:flex;}
+.note-btn .icon{width:15px; height:15px;}
+.note-btn.has{color:var(--text); border-color:var(--muted2);}
+
+/* ---------- Streak (compromisos) ---------- */
+.streak{display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; padding:4px 9px; border-radius:20px; background:var(--card2); border:1px solid var(--line);}
+.streak .icon{width:14px; height:14px;}
+.streak.hot{color:var(--ok); border-color:var(--ok);}
+.streak.hot .icon path{stroke:var(--ok); fill:rgba(34,197,94,.15);}
+.streak.zero{color:var(--muted2);}
+
+.empty{color:var(--muted2); font-size:13px; text-align:center; padding:14px;}
+
+/* ---------- Chips / meals / mood ---------- */
+.chips{display:flex; gap:8px; flex-wrap:wrap; padding:6px 8px 4px;}
+.chip{padding:9px 14px; border-radius:14px; border:1px solid var(--line); background:var(--card2); font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; transition:all .15s;}
+.chip.on{color:#fff;}
+.meal{display:flex; align-items:center; gap:12px; padding:10px 8px;}
+.meal input{flex:1; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:10px; padding:9px 11px; font-size:13px; outline:none;}
+.meal input::placeholder{color:var(--muted2);}
+.mood{display:flex; gap:6px; padding:8px; justify-content:space-between;}
+.mood b{flex:1; text-align:center; padding:10px 0; border-radius:10px; background:var(--card2); border:1px solid var(--line); font-size:14px; font-weight:700; color:var(--muted); cursor:pointer;}
+.mood b.on{color:#0E0F13;}
+
+textarea{width:100%; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:12px; font-size:14px; font-family:inherit; resize:vertical; min-height:80px; outline:none;}
+textarea::placeholder{color:var(--muted2);}
+
+/* ---------- Week grid ---------- */
+.grid{width:100%; border-collapse:collapse; font-size:13px;}
+.grid th,.grid td{padding:0; text-align:center;}
+.grid thead th{color:var(--muted); font-weight:600; font-size:11px; padding-bottom:8px;}
+.grid td.hn{text-align:left; color:var(--text); font-weight:550; padding:7px 6px 7px 4px; font-size:13px; white-space:nowrap; max-width:118px; overflow:hidden; text-overflow:ellipsis;}
+.cell{width:26px; height:26px; margin:2px auto; border-radius:8px; border:1px solid var(--line); cursor:pointer;}
+.cell.on{border:none;}
+.cell.today{box-shadow:0 0 0 2px var(--muted2);}
+.subhead{font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; padding:12px 6px 4px;}
+
+/* ---------- Month ---------- */
+.mgrid{display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:6px 4px;}
+.mday{aspect-ratio:1; border-radius:10px; background:var(--card2); border:1px solid var(--line); display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:11px; color:var(--muted); position:relative;}
+.mday .n{font-weight:700; font-size:13px; color:var(--text);}
+.mday.today{border-color:var(--text);}
+.mday .pts{font-size:9px; margin-top:1px;}
+
+/* ---------- Goals ---------- */
+.gcard{border-radius:var(--radius); padding:16px; margin-bottom:12px; cursor:pointer; border:1px solid var(--line);}
+.gcard .top{display:flex; align-items:center; gap:12px;}
+.gcard .gicon{width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex:none;}
+.gcard .gicon .icon{width:22px; height:22px;}
+.gcard .gt{font-weight:700; font-size:16px;}
+.gcard .gw{font-size:13px; color:var(--muted); margin-top:8px;}
+.gbar{height:8px; border-radius:20px; background:var(--card2); margin-top:12px; overflow:hidden;}
+.gbar i{display:block; height:100%; border-radius:20px;}
+.gpct{font-size:12px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;}
+
+/* ---------- Bottom nav ---------- */
+.nav{position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:520px; background:rgba(14,15,19,.86); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-top:1px solid var(--line); display:flex; padding:8px 6px calc(env(safe-area-inset-bottom) + 8px);}
+.nav button{flex:1; background:none; border:none; color:var(--muted2); font-size:10px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:4px; padding:6px 0; cursor:pointer;}
+.nav button.on{color:var(--text);}
+.nav .icon{width:22px; height:22px;}
+
+/* ---------- Modal ---------- */
+.ov{position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:flex-end; justify-content:center; z-index:50;}
+.sheet{background:var(--card); width:100%; max-width:520px; border-radius:22px 22px 0 0; padding:22px 18px calc(env(safe-area-inset-bottom) + 22px); animation:up .25s ease; max-height:88vh; overflow-y:auto;}
+@keyframes up{from{transform:translateY(30px); opacity:.6;} to{transform:translateY(0); opacity:1;}}
+.sheet h3{margin:0 0 4px; font-size:19px;}
+.sheet .mm{font-size:13px; color:var(--muted); margin-bottom:14px;}
+.btn{width:100%; padding:14px; border-radius:14px; border:none; font-size:15px; font-weight:650; cursor:pointer; margin-top:10px;}
+.btn.p{background:var(--text); color:var(--bg);}
+.btn.g{background:var(--card2); color:var(--text); border:1px solid var(--line);}
+.scale{display:flex; gap:5px; margin:6px 0 4px;}
+.scale b{flex:1; text-align:center; padding:9px 0; border-radius:9px; background:var(--card2); border:1px solid var(--line); font-weight:700; color:var(--muted); cursor:pointer; font-size:13px;}
+.scale b.on{background:var(--text); color:var(--bg);}
+.lbl{font-size:12px; color:var(--muted); margin:14px 0 4px;}
+.field{width:100%; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:12px; font-size:14px; outline:none;}
+.addbtn{width:100%; padding:12px; border-radius:12px; border:1px dashed var(--line); background:transparent; color:var(--muted); font-size:14px; font-weight:600; cursor:pointer; margin-top:6px; display:flex; align-items:center; justify-content:center; gap:6px;}
+.addbtn .icon{width:16px; height:16px;}
+.quote{font-size:13px; font-style:italic; color:var(--muted); padding:10px 14px; border-left:3px solid var(--line); margin:8px 0;}
+.vboard{margin-top:14px; padding:22px 12px; border:1px dashed var(--line); border-radius:12px; color:var(--muted2); font-size:13px; text-align:center;}
+
+/* ---------- Segmented (Semana / Mes) ---------- */
+.seg{display:flex; gap:4px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:4px; margin-bottom:14px;}
+.seg button{flex:1; padding:10px; border:none; border-radius:10px; background:transparent; color:var(--muted); font-size:14px; font-weight:650; cursor:pointer; transition:all .15s;}
+.seg button.on{background:var(--card2); color:var(--text);}
+
+/* ---------- Manage rows (Ajustes) ---------- */
+.dotc{width:12px; height:12px; border-radius:50%; flex:none;}
+
+/* ---------- Color swatches ---------- */
+.swatches{display:flex; flex-wrap:wrap; gap:9px; padding:4px 0;}
+.sw{width:32px; height:32px; border-radius:9px; cursor:pointer; border:2px solid transparent; transition:transform .12s;}
+.sw.on{border-color:var(--text); transform:scale(1.08);}
+
+/* ---------- Icon picker ---------- */
+.iconpick{display:flex; flex-wrap:wrap; gap:8px; padding:4px 0;}
+.ip{width:40px; height:40px; border-radius:11px; border:1px solid var(--line); background:var(--card2); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer;}
+.ip .icon{width:20px; height:20px;}
+.ip.on{border-width:2px;}
+
+/* ---------- Segmented pequeño (Menú/Fichas) ---------- */
+.seg.small{margin-bottom:8px;}
+.seg.small button{padding:8px; font-size:13px;}
+
+/* ---------- Próximas / fechas ---------- */
+.datechip{font-size:11px; font-weight:700; color:var(--muted); background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:4px 8px; flex:none; min-width:52px; text-align:center;}
+
+/* ---------- Fichas de comida ---------- */
+.ficat{padding:8px 4px 12px; border-bottom:1px solid var(--line);}
+.ficat:last-of-type{border-bottom:none;}
+.ficat-h{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+.fname{font-weight:650; font-size:14px;}
+.fcount{font-size:13px; color:var(--muted); font-weight:600;}
+.fichas{display:flex; flex-wrap:wrap; gap:8px;}
+.ficha{width:30px; height:30px; border-radius:9px; border:2px solid var(--line); background:var(--card2); cursor:pointer; transition:transform .12s;}
+.ficha.on{transform:scale(1.05);}
+.waterctl{display:flex; align-items:center; gap:10px;}
+.waterctl > button{width:34px; height:34px; flex:none; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.waterctl .wbar{display:flex; flex-wrap:wrap; gap:6px; flex:1;}
+.waterctl .ficha{width:22px; height:22px; border-radius:7px;}
+.subhead2{font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; padding:12px 2px 6px;}
+.reflink{margin-top:8px; background:none; border:none; color:var(--muted2); font-size:12px; text-decoration:underline; cursor:pointer; padding:2px;}
+.catrow{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line); font-size:14px;}
+.catrow .amt{color:var(--muted); font-size:13px; white-space:nowrap;}
+
+/* ---------- Calendario agenda ---------- */
+.mnav{display:flex; align-items:center; justify-content:space-between; padding:2px 4px 10px;}
+.mnav b{font-size:15px; font-weight:700;}
+.mnav button{width:34px; height:34px; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.mday{cursor:pointer;}
+.mday .dots{display:flex; gap:3px; margin-top:2px; height:6px;}
+.cdot{width:5px; height:5px; border-radius:50%; display:inline-block;}
+.leyenda{display:flex; gap:16px; justify-content:center; padding:10px 0 2px; font-size:12px; color:var(--muted);}
+.leyenda span{display:flex; align-items:center; gap:5px;}
+
+/* ---------- Gym card ---------- */
+.gymrow{display:flex; align-items:center; justify-content:space-between; padding:8px 6px;}
+.gymrow .name{font-weight:650; font-size:15px;}
+.gymrow .sub{font-size:12px; color:var(--muted); margin-top:2px;}
+.startbtn{display:flex; align-items:center; gap:6px; background:var(--cuerpo); color:#fff; border:none; border-radius:12px; padding:11px 16px; font-size:14px; font-weight:700; cursor:pointer;}
+.startbtn .icon{width:16px; height:16px;} .startbtn .icon path{stroke:#fff; fill:#fff;}
+.gymlinks{display:flex; gap:8px; padding:6px;}
+.gymlinks button{flex:1; background:var(--card2); border:1px solid var(--line); color:var(--muted); border-radius:10px; padding:9px; font-size:12px; font-weight:600; cursor:pointer;}
+
+/* two-column form rows */
+.row2{display:flex; gap:12px;} .row2 > div{flex:1;}
+
+/* gym stats */
+.statrow{display:flex; gap:12px; padding:6px 4px;}
+.stat{flex:1; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:14px; text-align:center;}
+.stat b{display:block; font-size:24px; font-weight:800; color:var(--ok);}
+.stat span{font-size:11px; color:var(--muted);}
+
+/* ---------- Workouts: hero ---------- */
+.hero{border-radius:var(--radius); padding:20px; margin-bottom:14px; border:1px solid var(--line); background:linear-gradient(140deg, #FF5A3C33, var(--card) 70%);}
+.hero-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
+.hero-tag{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--cuerpo); background:#FF5A3C22; padding:5px 10px; border-radius:20px;}
+.hero-tag .icon{width:14px; height:14px;}
+.hero-title{font-size:24px; font-weight:800; line-height:1.15;}
+.hero-sub{font-size:13px; color:var(--muted); margin-top:4px;}
+.hero-cta{width:100%; margin-top:16px; padding:15px; border-radius:14px; border:none; background:var(--cuerpo); color:#fff; font-size:16px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;}
+.hero-cta .icon path{stroke:#fff; fill:#fff;}
+.hero-link{width:100%; margin-top:8px; padding:10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:13px; font-weight:600; cursor:pointer;}
+
+/* quick log de clases */
+.quicklog{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+.quicklog button{flex:1; min-width:130px; display:flex; align-items:center; justify-content:center; gap:8px; padding:14px; border-radius:14px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:14px; font-weight:650; cursor:pointer;}
+.quicklog button .icon{width:18px; height:18px;}
+
+/* tira semanal */
+.wstrip{display:flex; gap:6px; padding:4px 2px;}
+.wday{flex:1; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:10px 4px; text-align:center; cursor:pointer; min-width:0;}
+.wday.today{border-color:var(--text);}
+.wday.done{background:rgba(34,197,94,.16); border-color:var(--ok);}
+.wd-n{display:block; font-size:11px; font-weight:700; color:var(--muted);}
+.wd-ic{display:flex; align-items:center; justify-content:center; height:22px; color:var(--cuerpo);}
+.wday.done .wd-ic{color:var(--ok);}
+.wd-ic .icon{width:16px; height:16px;}
+.wd-r{display:block; font-size:9px; color:var(--muted2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+/* registro de series en el player */
+.pl-log{display:flex; gap:12px; margin-top:16px; width:100%; max-width:280px;}
+.pl-log > div{flex:1; text-align:left;}
+.pl-log label{display:block; font-size:11px; color:var(--muted); margin-bottom:4px; text-align:center;}
+.pl-log input{width:100%; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:14px; font-size:22px; font-weight:700; text-align:center; outline:none;}
+.pl-last{margin-top:10px; font-size:13px; color:var(--muted2);}
+
+/* ---------- Reordenar secciones de Hoy ---------- */
+.hoylist{display:block;}
+.dsec{touch-action:pan-y;}
+.dsec.dragging{opacity:.97;}
+.dsec.dragging .sec{border-color:var(--cuerpo); box-shadow:0 10px 30px rgba(0,0,0,.55); transform:scale(1.015);}
+.dsec.dragging .sec-h{cursor:grabbing;}
+body.noscroll{overflow:hidden; touch-action:none;}
+
+/* ---------- Reproductor de entrenamiento (pantalla completa) ---------- */
+.player{position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; flex-direction:column; max-width:520px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 12px) 20px calc(env(safe-area-inset-bottom) + 20px);}
+.pl-top{display:flex; align-items:center; justify-content:space-between; gap:12px;}
+.pl-x{width:38px; height:38px; border-radius:11px; border:1px solid var(--line); background:var(--card2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.pl-prog{flex:1; text-align:center; font-size:13px; color:var(--muted); font-weight:600;}
+.pl-elapsed{font-size:13px; color:var(--muted2); font-variant-numeric:tabular-nums; min-width:46px; text-align:right;}
+.pl-mid{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px;}
+.pl-ex{font-size:26px; font-weight:800; line-height:1.15;}
+.pl-set{font-size:16px; color:var(--muted); font-weight:600;}
+.pl-reps{font-size:15px; color:var(--text);}
+.pl-note{font-size:13px; color:var(--muted2); margin-top:4px;}
+.pl-restlbl{font-size:15px; color:var(--muted); text-transform:uppercase; letter-spacing:1px;}
+.pl-timer{font-size:76px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--ok); line-height:1;}
+.pl-next{font-size:14px; color:var(--muted);}
+.pl-next.big{font-size:22px; font-weight:700; color:var(--text);}
+.pl-summary{font-size:14px; color:var(--muted);}
+.pl-done{width:64px; height:64px; border-radius:50%; background:rgba(34,197,94,.15); display:flex; align-items:center; justify-content:center;}
+.pl-done .icon{width:34px; height:34px;} .pl-done .icon path{stroke:var(--ok); stroke-width:3;}
+.pl-done.big{width:84px; height:84px;} .pl-done.big .icon{width:46px; height:46px;}
+.pl-actions{display:flex; flex-direction:column; gap:10px;}
+.pl-primary{width:100%; padding:18px; border-radius:16px; border:none; background:var(--text); color:var(--bg); font-size:16px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;}
+.pl-primary .icon path{stroke:var(--bg); fill:var(--bg);}
+.pl-sub{text-align:center; font-size:12px; color:var(--muted2);}
+.pl-restctl{display:flex; gap:10px;}
+.pl-restctl button{flex:1; padding:14px; border-radius:14px; border:1px solid var(--line); background:var(--card2); color:var(--text); font-size:14px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;}

@@ -1,0 +1,12 @@
+{
+  "name": "Push A (ejemplo)",
+  "days": ["lunes", "jueves"],
+  "exercises": [
+    { "name": "Press banca", "sets": 4, "reps": "8-10", "rest": 120, "weight": "60 kg", "note": "Baja controlado, pausa abajo" },
+    { "name": "Press inclinado con mancuerna", "sets": 3, "reps": "10-12", "rest": 90 },
+    { "name": "Press militar de pie", "sets": 3, "reps": "8-10", "rest": 120 },
+    { "name": "Elevaciones laterales", "sets": 4, "reps": "12-15", "rest": 60 },
+    { "name": "Fondos en paralelas", "sets": 3, "reps": "10", "rest": 90, "weight": "cuerpo" },
+    { "name": "Extensión de tríceps en polea", "sets": 3, "reps": "12-15", "rest": 60 }
+  ]
+}
