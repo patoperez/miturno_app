@@ -253,6 +253,14 @@ textarea::placeholder{color:var(--muted2);}
 .dsec.dragging .sec-h{cursor:grabbing;}
 body.noscroll{overflow:hidden; touch-action:none;}
 
+/* ---------- Vision board (fotos por meta) ---------- */
+.vgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0 4px;}
+.vthumb{position:relative; aspect-ratio:1; border-radius:12px; overflow:hidden; border:1px solid var(--line);}
+.vthumb img{width:100%; height:100%; object-fit:cover; display:block;}
+.vthumb button{position:absolute; top:5px; right:5px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;}
+.vthumb button .icon{width:14px; height:14px;} .vthumb button .icon path{stroke:#fff;}
+label.addbtn{display:flex; align-items:center; justify-content:center; gap:6px;}
+
 /* ---------- Reproductor de entrenamiento (pantalla completa) ---------- */
 .player{position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; flex-direction:column; max-width:520px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 12px) 20px calc(env(safe-area-inset-bottom) + 20px);}
 .pl-top{display:flex; align-items:center; justify-content:space-between; gap:12px;}

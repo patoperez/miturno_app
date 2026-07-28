@@ -10,7 +10,7 @@ const store = (() => {
   try { localStorage.setItem("__t", "1"); localStorage.removeItem("__t"); } catch (e) { ok = false; }
   return {
     get(k) { try { return ok ? localStorage.getItem(k) : mem[k]; } catch (e) { return mem[k]; } },
-    set(k, v) { try { ok ? localStorage.setItem(k, v) : (mem[k] = v); } catch (e) { mem[k] = v; } }
+    set(k, v) { try { ok ? localStorage.setItem(k, v) : (mem[k] = v); } catch (e) { mem[k] = v; } try { if (typeof window !== "undefined" && window.__onWrite) window.__onWrite(k); } catch (e2) {} }
   };
 })();
 
@@ -600,6 +600,11 @@ function renderAjustes() {
   }
   mealsBody += `<div style="height:6px"></div><button class="addbtn" onclick="openImportMeals()">${icon("upload")} Importar comidas (JSON)</button><button class="addbtn" onclick="exportMeals()">${icon("download")} Exportar comidas (JSON)</button>`;
   out += sec("a_meals", "Comidas", mv === "menu" ? "Menú" : "Fichas", mealsBody, "meal", "var(--cuerpo)");
+  out += sec("a_data", "Datos y respaldo", "",
+    `<div class="empty" style="text-align:left;padding:4px 2px 10px">Descarga un archivo con TODOS tus datos (config, historial, tareas y entrenos). Guárdalo por si cambias de dispositivo o de dominio.</div>
+     <button class="addbtn" onclick="exportAllData()">${icon("download")} Descargar respaldo</button>
+     <button class="addbtn" onclick="openImportData()">${icon("upload")} Restaurar respaldo</button>`, "sliders", "var(--muted)");
+  if (typeof cloudSection === "function") out += cloudSection();
   app.innerHTML = out;
 }
 function setUserName(v) { CFG.settings.userName = v.trim() || "tú"; saveCfg(); }
@@ -651,6 +656,63 @@ function idnChips(sel) { return CFG.identities.map(i => `<div class="chip" data-
 function pickIdn(el, id) { _tidn = _tidn === id ? null : id; document.querySelectorAll("#pickidn .chip").forEach(c => { c.style.background = ""; c.style.color = ""; c.style.borderColor = ""; }); if (_tidn) { el.style.background = getIdn(id).raw; el.style.color = "#fff"; el.style.borderColor = getIdn(id).raw; } }
 function saveTask() { const text = document.getElementById("ttxt").value.trim(); if (!text) return closeModal(); TASKS.push({ id: uid("t"), text, time: document.getElementById("ttime").value.trim(), idn: _tidn, done: false, date: _taskDate || today() }); _tidn = null; saveTasks(); closeModal(); render(); }
 
+/* ---------- Fotos por meta (vision board, en IndexedDB) ---------- */
+let _photoDB = null;
+function photoDB() {
+  return new Promise((res, rej) => {
+    if (typeof indexedDB === "undefined") return rej("sin indexedDB");
+    if (_photoDB) return res(_photoDB);
+    const r = indexedDB.open("miturno", 1);
+    r.onupgradeneeded = e => { const db = e.target.result; if (!db.objectStoreNames.contains("photos")) { const s = db.createObjectStore("photos", { keyPath: "id", autoIncrement: true }); s.createIndex("idn", "idn", { unique: false }); } };
+    r.onsuccess = e => { _photoDB = e.target.result; res(_photoDB); };
+    r.onerror = e => rej(e);
+  });
+}
+function idbGetPhotos(idn) {
+  return photoDB().then(db => new Promise((res, rej) => {
+    const idx = db.transaction("photos", "readonly").objectStore("photos").index("idn").getAll(idn);
+    idx.onsuccess = () => res(idx.result || []); idx.onerror = () => rej(idx.error);
+  }));
+}
+function idbAddPhoto(idn, dataUrl) {
+  return photoDB().then(db => new Promise((res, rej) => {
+    const rq = db.transaction("photos", "readwrite").objectStore("photos").add({ idn, dataUrl });
+    rq.onsuccess = () => res(); rq.onerror = () => rej(rq.error);
+  }));
+}
+function idbDelPhoto(id) {
+  return photoDB().then(db => new Promise((res, rej) => {
+    const rq = db.transaction("photos", "readwrite").objectStore("photos").delete(id);
+    rq.onsuccess = () => res(); rq.onerror = () => rej(rq.error);
+  }));
+}
+function compressImage(file, cb) {
+  const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = () => {
+    const max = 1100; let w = img.width, h = img.height;
+    if (w > h && w > max) { h = Math.round(h * max / w); w = max; } else if (h > max) { w = Math.round(w * max / h); h = max; }
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    try { cb(c.toDataURL("image/jpeg", 0.82)); } catch (e) { cb(null); }
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); cb(null); };
+  img.src = url;
+}
+function loadGoalPhotos(id) {
+  const box = document.getElementById("vboard"); if (!box) return;
+  idbGetPhotos(id).then(list => {
+    box.innerHTML = list.length ? list.map(p => `<div class="vthumb"><img src="${p.dataUrl}"><button onclick="delGoalPhoto(${p.id},'${id}')">${icon("close")}</button></div>`).join("") : `<div class="empty" style="grid-column:1/-1">Sin fotos aún. Agrega imágenes que representen esta meta.</div>`;
+  }).catch(() => { box.innerHTML = `<div class="empty" style="grid-column:1/-1">Las fotos solo funcionan en la app instalada.</div>`; });
+}
+function addGoalPhoto(id, input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const box = document.getElementById("vboard"); if (box) box.innerHTML = `<div class="empty" style="grid-column:1/-1">Procesando...</div>`;
+  compressImage(f, dataUrl => { if (!dataUrl) return loadGoalPhotos(id); idbAddPhoto(id, dataUrl).then(() => loadGoalPhotos(id)).catch(() => loadGoalPhotos(id)); });
+  input.value = "";
+}
+function delGoalPhoto(pid, id) { idbDelPhoto(pid).then(() => loadGoalPhotos(id)).catch(() => loadGoalPhotos(id)); }
+
 function openGoal(id) {
   const g = getIdn(id);
   const items = CFG.habits.filter(h => h.idn === id).map(h => "· " + h.name).concat(CFG.commitments.filter(c => c.idn === id).map(c => "· " + c.name));
@@ -658,8 +720,11 @@ function openGoal(id) {
     <h3 style="margin-top:10px">${esc(g.label)}</h3><div class="mm">Mi para qué</div><div style="font-size:15px;line-height:1.5">${esc(g.why)}</div>
     <div class="lbl">Recordatorios de identidad</div>${(g.quotes || []).map(q => `<div class="quote">${esc(q)}</div>`).join("") || `<div class="empty">Sin frases</div>`}
     <div class="lbl">Lo que vota por esta identidad</div><div style="font-size:14px;color:var(--muted)">${items.map(esc).join("<br>") || "—"}</div>
-    <div class="vboard">Aquí irá tu vision board: fotos y frases que representen esta meta</div>
+    <div class="lbl">Vision board</div>
+    <div id="vboard" class="vgrid"><div class="empty" style="grid-column:1/-1">Cargando...</div></div>
+    <label class="addbtn">${icon("plus")} Agregar foto<input type="file" accept="image/*" style="display:none" onchange="addGoalPhoto('${id}',this)"></label>
     <button class="btn p" onclick="openEditIdentity('${id}')">Editar meta</button><button class="btn g" onclick="closeModal()">Cerrar</button>`);
+  loadGoalPhotos(id);
 }
 
 let _eColor = null, _eIcon = null;
@@ -801,6 +866,60 @@ function exportMeals() {
   sheet(`<h3>Exportar comidas</h3><div class="mm">Copia este JSON para respaldarlo o editarlo</div>
     <textarea style="min-height:220px;font-family:monospace;font-size:12px" onclick="this.select()">${esc(JSON.stringify(clean, null, 2))}</textarea>
     <button class="btn g" onclick="render();closeModal()">Cerrar</button>`);
+}
+
+/* ---------- Respaldo (exportar / importar todos los datos) ---------- */
+const BACKUP_KEYS = ["mt_cfg", "mt_log", "mt_tasks", "mt_workouts", "mt_prog", "mt_hoyOrder", "mt_todayRoutine", "mt_activeWorkout"];
+function buildBackup() {
+  const data = {};
+  BACKUP_KEYS.forEach(k => { const v = store.get(k); if (v != null) data[k] = v; });
+  return { app: "mi-turno", version: 1, date: new Date().toISOString(), data };
+}
+function exportAllData() {
+  const json = JSON.stringify(buildBackup(), null, 2);
+  try {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `mi-turno-respaldo-${today()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    sheet(`<h3>Copia tu respaldo</h3><div class="mm">Copia y guarda este texto en un archivo .json</div>
+      <textarea style="min-height:220px;font-family:monospace;font-size:12px" onclick="this.select()">${esc(json)}</textarea>
+      <button class="btn g" onclick="closeModal()">Cerrar</button>`);
+  }
+}
+function openImportData() {
+  sheet(`<h3>Restaurar respaldo</h3><div class="mm">Reemplazará TODOS tus datos actuales con los del respaldo. Esto no se puede deshacer.</div>
+    <div class="lbl">Elige el archivo .json</div>
+    <input type="file" accept="application/json,.json" id="bkfile" class="field" onchange="importFromFile(this)">
+    <div class="lbl">O pega el contenido del respaldo</div>
+    <textarea id="bkpaste" placeholder="{ &quot;app&quot;: &quot;mi-turno&quot;, ... }" style="min-height:120px;font-family:monospace;font-size:12px"></textarea>
+    <div id="bkmsg" style="font-size:13px;margin-top:8px"></div>
+    <button class="btn p" onclick="importFromPaste()">Restaurar</button>
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function applyBackup(text) {
+  const msg = document.getElementById("bkmsg");
+  let o; try { o = JSON.parse(text); } catch (e) { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Archivo inválido: ${esc(e.message)}</span>`; return false; }
+  if (!o || o.app !== "mi-turno" || !o.data) { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Este no es un respaldo de Mi Turno.</span>`; return false; }
+  BACKUP_KEYS.forEach(k => { if (k in o.data) store.set(k, o.data[k]); });
+  return true;
+}
+function refreshState() {
+  CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts();
+  PROG = store.get("mt_prog") || "semana";
+  HOY_ORDER = (() => { let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; } if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice(); o = o.filter(k => DEFAULT_HOY_ORDER.includes(k)); DEFAULT_HOY_ORDER.forEach(k => { if (!o.includes(k)) o.push(k); }); return o; })();
+  buildNav(); render();
+}
+function reloadApp() { try { location.reload(); } catch (e) { refreshState(); } }
+function importFromPaste() { if (applyBackup(document.getElementById("bkpaste").value)) reloadApp(); }
+function importFromFile(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = e => { if (applyBackup(e.target.result)) reloadApp(); };
+  r.readAsText(f);
 }
 
 /* ---------- Navegación ---------- */

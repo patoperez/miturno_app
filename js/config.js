@@ -8,6 +8,10 @@
 const APP_NAME = "Mi Turno";
 const DEFAULT_USER_NAME = "Patricio";
 
+/* Supabase (URL y clave pública — seguras para el navegador, protegidas por RLS) */
+const SUPABASE_URL = "https://xeerkvjlguycmdrimfbn.supabase.co";
+const SUPABASE_KEY = "sb_publishable_lK_T9Z1R7-iHuykHk0NOug_nvzaHYFG";
+
 /* ---------- Íconos de línea (SVG path, viewBox 0 0 24 24) ---------- */
 const ICONS = {
   // Identidades

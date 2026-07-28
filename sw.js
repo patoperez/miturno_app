@@ -1,5 +1,5 @@
 /* Service worker · Mi Turno · offline básico (cache-first) */
-const CACHE = "mi-turno-v7";
+const CACHE = "mi-turno-v10";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const ASSETS = [
   "./js/app.js",
   "./js/gym.js",
   "./js/reorder.js",
+  "./js/sync.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
