@@ -26,6 +26,7 @@ function onPressStart(e, node, list) {
     dragging = true;
     node.classList.add("dragging");
     document.body.classList.add("noscroll");
+    const sc = document.getElementById("app"); if (sc) sc.classList.add("noscroll");
     try { if (navigator.vibrate) navigator.vibrate(12); } catch (_) {}
   }
   function onMove(ev) {
@@ -53,6 +54,7 @@ function onPressStart(e, node, list) {
     if (!wasDragging) return;
     node.classList.remove("dragging");
     document.body.classList.remove("noscroll");
+    const sc = document.getElementById("app"); if (sc) sc.classList.remove("noscroll");
     HOY_ORDER = Array.prototype.slice.call(list.querySelectorAll(".dsec")).map(n => n.dataset.key);
     DEFAULT_HOY_ORDER.forEach(k => { if (!HOY_ORDER.includes(k)) HOY_ORDER.push(k); });
     saveHoyOrder();

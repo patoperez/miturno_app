@@ -14,6 +14,12 @@ webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
 const WINDOW_MIN = 6; // debe ser >= al intervalo del cron (5 min)
 
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const MSGS: Record<string, { title: string; body: string }[]> = {
   morning: [
     { title: "Buenos días", body: "Empieza con intención. Abre Mi Turno y marca por dónde vas hoy." },
@@ -48,12 +54,13 @@ function localDate(tz: string): string {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
   let test = false, testUser: string | null = null;
   try { const b = await req.json(); test = !!b.test; testUser = b.user_id || null; } catch (_) { /* cron sin body */ }
 
   const { data: rows, error } = await sb.from("push_subscriptions").select("*");
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...cors, "Content-Type": "application/json" } });
 
   const results: unknown[] = [];
   for (const row of rows || []) {
@@ -93,5 +100,5 @@ Deno.serve(async (req) => {
     if (!test && toSend.length) await sb.from("push_subscriptions").update({ last_sent: last }).eq("user_id", row.user_id);
   }
 
-  return new Response(JSON.stringify({ sent: results }), { headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify({ sent: results }), { headers: { ...cors, "Content-Type": "application/json" } });
 });
