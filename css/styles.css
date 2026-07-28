@@ -261,6 +261,12 @@ body.noscroll{overflow:hidden; touch-action:none;}
 .vthumb button .icon{width:14px; height:14px;} .vthumb button .icon path{stroke:#fff;}
 label.addbtn{display:flex; align-items:center; justify-content:center; gap:6px;}
 
+/* ---------- Notificaciones ---------- */
+.ntrow{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 2px;}
+.ntlab{display:flex; align-items:center; gap:9px; font-size:14px; font-weight:550;}
+.ntlab input[type=checkbox]{width:20px; height:20px; accent-color:var(--productividad);}
+.nttime{width:auto; padding:8px 10px; font-size:14px;}
+
 /* ---------- Reproductor de entrenamiento (pantalla completa) ---------- */
 .player{position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; flex-direction:column; max-width:520px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 12px) 20px calc(env(safe-area-inset-bottom) + 20px);}
 .pl-top{display:flex; align-items:center; justify-content:space-between; gap:12px;}

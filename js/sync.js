@@ -110,5 +110,95 @@ function cloudSection() {
      <button class="addbtn" onclick="cloudSignOut()">Cerrar sesión</button>`, "upload", "var(--ingresos)");
 }
 
+/* ===================== NOTIFICACIONES (Web Push) ===================== */
+const NOTIF = { status: "", err: false };
+function notifSupported() { return typeof window !== "undefined" && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window; }
+function b64ToUint8(base64) {
+  const pad = "=".repeat((4 - base64.length % 4) % 4);
+  const b = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(b); const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function notifPrefs() { return (CFG.settings && CFG.settings.notif) || { enabled: false, morning: { on: true, time: "07:30" }, midday: { on: true, time: "15:00" }, night: { on: true, time: "21:30" } }; }
+function myTz() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Mexico_City"; } catch (e) { return "America/Mexico_City"; } }
+
+async function enableNotifications() {
+  if (!notifSupported()) { NOTIF.status = "Tu dispositivo no soporta notificaciones (instala la app primero)."; NOTIF.err = true; return updateNotifUI(); }
+  if (!SB.session) { NOTIF.status = "Primero conéctate en la sección Nube."; NOTIF.err = true; return updateNotifUI(); }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { NOTIF.status = "No diste permiso de notificaciones."; NOTIF.err = true; return updateNotifUI(); }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToUint8(VAPID_PUBLIC) });
+    const p = notifPrefs(); p.enabled = true; CFG.settings.notif = p; saveCfg();
+    await saveSubscription(sub);
+    NOTIF.status = "Notificaciones activadas."; NOTIF.err = false; updateNotifUI();
+  } catch (e) { NOTIF.status = "No se pudieron activar: " + e.message; NOTIF.err = true; updateNotifUI(); }
+}
+async function disableNotifications() {
+  const p = notifPrefs(); p.enabled = false; CFG.settings.notif = p; saveCfg();
+  try {
+    const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+    if (SB.session && SB.client) await SB.client.from("push_subscriptions").delete().eq("user_id", SB.session.user.id);
+  } catch (e) {}
+  NOTIF.status = "Notificaciones desactivadas."; NOTIF.err = false; updateNotifUI();
+}
+async function saveSubscription(sub) {
+  if (!SB.session || !SB.client) return;
+  const p = notifPrefs();
+  await SB.client.from("push_subscriptions").upsert({
+    user_id: SB.session.user.id, subscription: sub.toJSON ? sub.toJSON() : sub,
+    prefs: { morning: p.morning, midday: p.midday, night: p.night, name: CFG.settings.userName }, tz: myTz(), updated_at: new Date().toISOString()
+  });
+}
+async function saveNotifPrefs() {
+  const p = notifPrefs();
+  ["morning", "midday", "night"].forEach(s => {
+    const on = document.getElementById("nt_" + s + "_on"), tm = document.getElementById("nt_" + s + "_time");
+    if (on) p[s].on = on.checked; if (tm && tm.value) p[s].time = tm.value;
+  });
+  CFG.settings.notif = p; saveCfg();
+  if (p.enabled && SB.session && SB.client) {
+    await SB.client.from("push_subscriptions").update({ prefs: { morning: p.morning, midday: p.midday, night: p.night, name: CFG.settings.userName }, tz: myTz(), updated_at: new Date().toISOString() }).eq("user_id", SB.session.user.id);
+  }
+  NOTIF.status = "Horarios guardados."; NOTIF.err = false; updateNotifUI();
+}
+async function sendTestNotif() {
+  if (!SB.session || !SB.client) { NOTIF.status = "Conéctate a la nube primero."; NOTIF.err = true; return updateNotifUI(); }
+  NOTIF.status = "Enviando prueba..."; NOTIF.err = false; updateNotifUI();
+  try {
+    const { error } = await SB.client.functions.invoke("send-reminders", { body: { test: true, user_id: SB.session.user.id } });
+    NOTIF.status = error ? ("Error: " + error.message + " (¿desplegaste la función?)") : "Prueba enviada. Debe llegarte en unos segundos.";
+    NOTIF.err = !!error;
+  } catch (e) { NOTIF.status = "Error: " + e.message; NOTIF.err = true; }
+  updateNotifUI();
+}
+function updateNotifUI() { if (typeof VIEW !== "undefined" && VIEW === "ajustes") render(); }
+
+function notifRow(slot, label) {
+  const p = notifPrefs()[slot] || { on: true, time: "08:00" };
+  return `<div class="ntrow"><label class="ntlab"><input type="checkbox" id="nt_${slot}_on" ${p.on ? "checked" : ""}> ${label}</label>
+    <input type="time" id="nt_${slot}_time" class="field nttime" value="${esc(p.time)}"></div>`;
+}
+function notifSection() {
+  const p = notifPrefs();
+  const msg = NOTIF.status ? `<div style="font-size:13px;margin:8px 2px;color:${NOTIF.err ? "var(--bad)" : "var(--ok)"}">${esc(NOTIF.status)}</div>` : "";
+  if (!notifSupported()) return sec("a_notif", "Notificaciones", "No disponible", `<div class="empty" style="text-align:left;padding:6px 2px">Las notificaciones funcionan en la app instalada en tu pantalla de inicio.</div>${msg}`, "clock", "var(--productividad)");
+  let body = `<div class="empty" style="text-align:left;padding:4px 2px 10px">Resumen en la mañana, empujón a media tarde y repaso en la noche. Requiere estar conectado en la Nube.</div>`;
+  body += notifRow("morning", "Mañana (resumen)") + notifRow("midday", "Tarde (empujón)") + notifRow("night", "Noche (repaso)");
+  body += `<button class="addbtn" onclick="saveNotifPrefs()">Guardar horarios</button>`;
+  if (p.enabled) {
+    body += `<button class="addbtn" onclick="sendTestNotif()">${icon("upload")} Enviar notificación de prueba</button>`;
+    body += `<button class="addbtn" onclick="disableNotifications()" style="color:var(--bad)">Desactivar notificaciones</button>`;
+  } else {
+    body += `<button class="btn p" onclick="enableNotifications()">Activar notificaciones</button>`;
+  }
+  body += msg;
+  return sec("a_notif", "Notificaciones", p.enabled ? "Activas" : "Apagadas", body, "clock", "var(--productividad)");
+}
+
 /* ---------- Init ---------- */
 sbInit();

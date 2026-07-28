@@ -12,6 +12,9 @@ const DEFAULT_USER_NAME = "Patricio";
 const SUPABASE_URL = "https://xeerkvjlguycmdrimfbn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_lK_T9Z1R7-iHuykHk0NOug_nvzaHYFG";
 
+/* Llave pública de notificaciones (VAPID) — segura para el navegador */
+const VAPID_PUBLIC = "BPKN-6oj8ac8FQcdqAb8LFzPKSXL4gqebi6k4IBVyFL8IUU326ffNY9BE0w0yhF1mDbpclmqozG0Chz0cHrFDjo";
+
 /* ---------- Íconos de línea (SVG path, viewBox 0 0 24 24) ---------- */
 const ICONS = {
   // Identidades
@@ -73,7 +76,10 @@ const WEEKDAYS = ["lunes","martes","miércoles","jueves","viernes","sábado","do
 
 /* ---------- SEMILLA inicial (solo la primera vez) ---------- */
 const DEFAULT_CFG = {
-  settings: { userName: DEFAULT_USER_NAME, mealView: "menu" },
+  settings: {
+    userName: DEFAULT_USER_NAME, mealView: "menu",
+    notif: { enabled: false, morning: { on: true, time: "07:30" }, midday: { on: true, time: "15:00" }, night: { on: true, time: "21:30" } }
+  },
   identities: [
     { id:"cuerpo", label:"El que construye su cuerpo", icon:"cuerpo", raw:"#FF5A3C",
       why:"Recomposición, luego bulk, luego cut. Un proceso de alrededor de un año para tener el cuerpo que quiero.",

@@ -20,6 +20,7 @@ function loadCfg() {
   if (!c || !c.identities) c = JSON.parse(JSON.stringify(DEFAULT_CFG));
   c.settings = c.settings || {}; if (!c.settings.userName) c.settings.userName = DEFAULT_USER_NAME;
   if (!c.settings.mealView) c.settings.mealView = "menu";
+  if (!c.settings.notif) c.settings.notif = JSON.parse(JSON.stringify(DEFAULT_CFG.settings.notif));
   c.identities = c.identities || []; c.habits = c.habits || []; c.commitments = c.commitments || [];
   if (!c.meals) c.meals = JSON.parse(JSON.stringify(DEFAULT_CFG.meals));
   c.meals.menu = c.meals.menu || [];
@@ -605,6 +606,7 @@ function renderAjustes() {
      <button class="addbtn" onclick="exportAllData()">${icon("download")} Descargar respaldo</button>
      <button class="addbtn" onclick="openImportData()">${icon("upload")} Restaurar respaldo</button>`, "sliders", "var(--muted)");
   if (typeof cloudSection === "function") out += cloudSection();
+  if (typeof notifSection === "function") out += notifSection();
   app.innerHTML = out;
 }
 function setUserName(v) { CFG.settings.userName = v.trim() || "tú"; saveCfg(); }
