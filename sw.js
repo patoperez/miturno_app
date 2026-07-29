@@ -1,5 +1,5 @@
 /* Service worker · Mi Turno · offline básico (cache-first) */
-const CACHE = "mi-turno-v15";
+const CACHE = "mi-turno-v16";
 const ASSETS = [
   "./",
   "./index.html",
@@ -46,11 +46,18 @@ self.addEventListener("notificationclick", e => {
 
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
-  e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-      const copy = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => cached))
-  );
+  const url = new URL(e.request.url);
+  if (url.origin === location.origin) {
+    // App propia: RED PRIMERO (siempre lo último con internet), caché como respaldo offline.
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+  } else {
+    // Recursos externos (CDN): caché primero.
+    e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
+  }
 });
