@@ -67,8 +67,23 @@ function onPressStart(e, node, list) {
   document.addEventListener("pointercancel", onUp);
 }
 
+/* ---------- Alto real de la barra inferior ----------
+   La barra está fija al borde inferior, así que .app reserva su alto como
+   padding. Se mide en runtime para que nunca quede corto ni sobre (safe area,
+   tamaño de texto del sistema, rotación). */
+function syncNavHeight() {
+  const n = document.getElementById("nav");
+  if (!n) return;
+  const h = Math.round(n.getBoundingClientRect().height);
+  if (h > 0) document.documentElement.style.setProperty("--nav-h", h + "px");
+}
+
 /* ---------- Init de la app ---------- */
 freezePastDays();
 buildNav();
 render();
+syncNavHeight();
+if (window.ResizeObserver) new ResizeObserver(syncNavHeight).observe(document.getElementById("nav"));
+window.addEventListener("resize", syncNavHeight);
+window.addEventListener("orientationchange", () => setTimeout(syncNavHeight, 300));
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));

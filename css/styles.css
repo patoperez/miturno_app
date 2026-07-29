@@ -8,19 +8,33 @@
   --cuerpo:#FF5A3C; --ingresos:#10B981; --ciber:#3B82F6;
   --productividad:#8B5CF6; --lectura:#F59E0B; --ok:#22C55E; --bad:#EF4444;
   --radius:18px;
+  /* Alto real de la barra inferior (incluye el safe-area del home indicator).
+     reorder.js lo re-mide en runtime; este valor es solo el arranque. */
+  --nav-h:calc(69px + env(safe-area-inset-bottom));
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{margin:0; padding:0;}
+/* La cadena de alto arranca en <html>: el viewport manda, no el contenido.
+   overflow:hidden va aquí (raíz) para que la propagación al viewport NO salga
+   de <body>; así <body> conserva su propio overflow y su propio alto. */
+html{
+  height:100%;
+  height:100dvh;
+  overflow:hidden;
+  background:var(--bg);
+}
 body{
   background:var(--bg); color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   font-size:16px; line-height:1.4; overscroll-behavior:none;
-  position:fixed; inset:0; max-width:520px; margin:0 auto;
+  position:relative; height:100%; max-width:520px; margin:0 auto;
   display:flex; flex-direction:column; overflow:hidden;
   -webkit-font-smoothing:antialiased;
 }
-.app{flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:calc(env(safe-area-inset-top) + 20px) 18px 18px;}
+.app{flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+     padding:calc(env(safe-area-inset-top) + 20px) 18px calc(var(--nav-h) + 18px);}
 .app.noscroll{overflow:hidden; touch-action:none;}
+#modal{flex:none;}
 .icon{width:20px; height:20px; flex:none;}
 .icon path{fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
 
@@ -117,7 +131,14 @@ textarea::placeholder{color:var(--muted2);}
 .gpct{font-size:12px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;}
 
 /* ---------- Bottom nav ---------- */
-.nav{flex:none; width:100%; background:var(--bg); border-top:1px solid var(--line); display:flex; padding:8px 6px calc(env(safe-area-inset-bottom) + 8px);}
+/* Anclada al borde inferior del viewport, no al final del contenido.
+   z-index 20 queda por debajo de .ov (50) y .player (100). */
+.nav{
+  position:fixed; left:0; right:0; bottom:0; z-index:20;
+  max-width:520px; margin:0 auto;
+  background:var(--bg); border-top:1px solid var(--line); display:flex;
+  padding:8px calc(env(safe-area-inset-right) + 6px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 6px);
+}
 .nav button{flex:1; background:none; border:none; color:var(--muted2); font-size:10px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:4px; padding:6px 0; cursor:pointer;}
 .nav button.on{color:var(--text);}
 .nav .icon{width:22px; height:22px;}
