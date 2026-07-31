@@ -245,7 +245,7 @@ function gymCardHoy(d) {
   const r = todayRoutine();
   if (doneT.length) {
     const vol = doneT.reduce((a, w) => a + (w.volume || 0), 0);
-    let body = `<div class="gymrow"><div><div class="name" style="color:var(--ok)">Ya entrenaste hoy</div><div class="sub">${esc(doneT.map(w => w.name).join(", "))}${vol ? " · " + Math.round(vol) + " kg vol" : ""}</div></div><span style="color:var(--ok);display:flex">${icon("check")}</span></div>`;
+    let body = `<div class="gymrow"><div><div class="name" style="color:var(--ok)">Ya entrenaste hoy</div><div class="sub">${esc(doneT.map(w => w.name).join(", "))}${vol ? " · " + Math.round(vol) + " " + ((CFG.settings && CFG.settings.unit) || "kg") + " vol" : ""}</div></div><span style="color:var(--ok);display:flex">${icon("check")}</span></div>`;
     if (r && !doneT.some(w => w.routineId === r.id)) body += `<div class="gymlinks"><button onclick="startWorkout('${r.id}')">${icon("play")} Iniciar ${esc(r.name)}</button></div>`;
     return sec("h_gym", "Workouts", `${doneT.length} hoy`, body, "dumbbell", "var(--cuerpo)");
   }
@@ -421,7 +421,8 @@ function fmtDur(sec) { const m = Math.round((sec || 0) / 60); return m + " min";
 function workoutSummary(w) {
   const a = getAct(w.activityId);
   if (a.type === "strength" || w.sets) {
-    const s = (w.sets || []).length; return `${s} series · ${fmtDur(w.duration)}${w.volume ? " · " + Math.round(w.volume) + " kg vol" : ""}`;
+    const s = (w.sets || []).length, u = w.unit || (CFG.settings && CFG.settings.unit) || "kg";
+    return `${s} series · ${fmtDur(w.duration)}${w.volume ? " · " + Math.round(w.volume) + " " + u + " vol" : ""}`;
   }
   return `${w.duration || 0} min${w.intensity ? " · intensidad " + w.intensity + "/10" : ""}`;
 }
@@ -446,6 +447,9 @@ function renderWorkouts() {
   if (classes.length) out += `<div class="quicklog">${classes.map(a => `<button style="border-color:${a.color}44" onclick="openLogSession('${a.id}')"><span style="color:${a.color}">${icon(a.icon)}</span>${esc(a.name)}</button>`).join("")}</div>`;
   // Tira semanal del split
   out += sec("w_week", "Tu semana", "", weeklyStrip(), "calendar", "var(--cuerpo)");
+  // Unidad de peso
+  const U = (CFG.settings && CFG.settings.unit) || "kg";
+  out += `<div class="unitrow"><span>Unidad de peso</span><div class="seg small unitseg"><button class="${U === "kg" ? "on" : ""}" onclick="setWeightUnit('kg')">kg</button><button class="${U === "lb" ? "on" : ""}" onclick="setWeightUnit('lb')">lb</button></div></div>`;
   // Stats
   const wd = weekDates(), sem = new Set(workoutsInRange(wd[0], wd[6]).map(w => w.date)).size;
   const ym = today().slice(0, 7), mes = new Set(WORKOUTS.filter(w => w.date.slice(0, 7) === ym).map(w => w.date)).size;
@@ -462,7 +466,7 @@ function renderWorkouts() {
   const exs = allLoggedExercises();
   out += sec("w_rec", "Records", String(exs.length), exs.length ? exs.map(name => {
     const pr = exercisePR(name);
-    return `<div class="row"><span class="idi" style="background:#F59E0B22;color:#F59E0B">${icon("trophy")}</span><div class="body"><div class="name">${esc(name)}</div><div class="sub">${pr ? pr.weight + " kg × " + esc(pr.reps) : "—"}</div></div></div>`;
+    return `<div class="row"><span class="idi" style="background:#F59E0B22;color:#F59E0B">${icon("trophy")}</span><div class="body"><div class="name">${esc(name)}</div><div class="sub">${pr ? pr.weight + " " + ((CFG.settings && CFG.settings.unit) || "kg") + " × " + esc(pr.reps) : "—"}</div></div></div>`;
   }).join("") : `<div class="empty">Tus records aparecerán al registrar pesos.</div>`, "trophy", "var(--lectura)");
   // Rutinas
   const list = CFG.routines.length ? CFG.routines.map(r2 => `<div class="row"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
@@ -495,7 +499,8 @@ function openWorkoutDetail(id) {
   if (w.sets && w.sets.length) {
     const byEx = {};
     w.sets.forEach(s => { (byEx[s.exName] = byEx[s.exName] || []).push(s); });
-    body = Object.keys(byEx).map(nm => `<div class="lbl">${esc(nm)}</div>` + byEx[nm].map((s, i) => `<div class="catrow"><span>Serie ${i + 1}</span><span class="amt">${s.weight ? s.weight + " kg" : "—"} × ${esc(s.reps) || "—"}</span></div>`).join("")).join("");
+    const wu = w.unit || (CFG.settings && CFG.settings.unit) || "kg";
+    body = Object.keys(byEx).map(nm => `<div class="lbl">${esc(nm)}</div>` + byEx[nm].map((s, i) => `<div class="catrow"><span>Serie ${i + 1}</span><span class="amt">${s.weight ? s.weight + " " + wu : "—"} × ${esc(s.reps) || "—"}</span></div>`).join("")).join("");
   } else {
     body = `<div class="catrow"><span>Duración</span><span class="amt">${w.duration || 0} min</span></div>${w.intensity ? `<div class="catrow"><span>Intensidad</span><span class="amt">${w.intensity}/10</span></div>` : ""}${w.notes ? `<div class="lbl">Notas</div><div style="font-size:14px;color:var(--muted)">${esc(w.notes)}</div>` : ""}`;
   }
@@ -701,31 +706,116 @@ function compressImage(file, cb) {
   img.onerror = () => { URL.revokeObjectURL(url); cb(null); };
   img.src = url;
 }
+function idbUpdatePhoto(pid, caption) {
+  return photoDB().then(db => new Promise((res, rej) => {
+    const st = db.transaction("photos", "readwrite").objectStore("photos");
+    const g = st.get(pid);
+    g.onsuccess = () => { const rec = g.result; if (!rec) return res(); rec.caption = caption; const p = st.put(rec); p.onsuccess = () => res(); p.onerror = () => rej(p.error); };
+    g.onerror = () => rej(g.error);
+  }));
+}
 function loadGoalPhotos(id) {
   const box = document.getElementById("vboard"); if (!box) return;
+  const g = getIdn(id);
   idbGetPhotos(id).then(list => {
-    box.innerHTML = list.length ? list.map(p => `<div class="vthumb"><img src="${p.dataUrl}"><button onclick="delGoalPhoto(${p.id},'${id}')">${icon("close")}</button></div>`).join("") : `<div class="empty" style="grid-column:1/-1">Sin fotos aún. Agrega imágenes que representen esta meta.</div>`;
-  }).catch(() => { box.innerHTML = `<div class="empty" style="grid-column:1/-1">Las fotos solo funcionan en la app instalada.</div>`; });
+    if (!list.length) { box.innerHTML = `<div class="vempty"><span style="color:${g.raw}">${icon("star")}</span><b>Tu tablero está en blanco</b><span>Agrega imágenes de la vida que estás construyendo. Cada una cuenta parte de tu historia.</span></div>`; return; }
+    box.innerHTML = list.map((p, i) => `<figure class="vcard ${i % 5 === 0 ? "wide" : ""}" onclick="openPhoto(${p.id},'${id}')" style="--acc:${g.raw}">
+      <img src="${p.dataUrl}" alt="">
+      <figcaption>${p.caption ? esc(p.caption) : `<span class="vcap-empty">Toca para contar su historia</span>`}</figcaption>
+    </figure>`).join("");
+  }).catch(() => { box.innerHTML = `<div class="vempty"><span>Las fotos se guardan en este dispositivo.</span></div>`; });
 }
 function addGoalPhoto(id, input) {
   const f = input.files && input.files[0]; if (!f) return;
-  const box = document.getElementById("vboard"); if (box) box.innerHTML = `<div class="empty" style="grid-column:1/-1">Procesando...</div>`;
+  const box = document.getElementById("vboard"); if (box) box.innerHTML = `<div class="vempty"><span>Procesando imagen...</span></div>`;
   compressImage(f, dataUrl => { if (!dataUrl) return loadGoalPhotos(id); idbAddPhoto(id, dataUrl).then(() => loadGoalPhotos(id)).catch(() => loadGoalPhotos(id)); });
   input.value = "";
 }
-function delGoalPhoto(pid, id) { idbDelPhoto(pid).then(() => loadGoalPhotos(id)).catch(() => loadGoalPhotos(id)); }
+function delGoalPhoto(pid, id) { idbDelPhoto(pid).then(() => { closePhoto(); loadGoalPhotos(id); }).catch(() => loadGoalPhotos(id)); }
+function openPhoto(pid, id) {
+  idbGetPhotos(id).then(list => {
+    const p = list.find(x => x.id === pid); if (!p) return;
+    const g = getIdn(id);
+    const lay = document.getElementById("vlayer"); if (!lay) return;
+    lay.innerHTML = `<div class="vfull" onclick="if(event.target===this)closePhoto()">
+      <div class="vfull-inner">
+        <img src="${p.dataUrl}" alt="">
+        <div class="vfull-cap"><input id="vcap" value="${esc(p.caption)}" placeholder="¿Qué representa esta imagen?" style="border-color:${g.raw}55">
+          <div class="vfull-btns"><button onclick="savePhotoCaption(${pid},'${id}')" style="background:${g.raw}">Guardar</button>
+            <button onclick="delGoalPhoto(${pid},'${id}')" class="danger">Borrar</button>
+            <button onclick="closePhoto()">Cerrar</button></div></div>
+      </div></div>`;
+  });
+}
+function savePhotoCaption(pid, id) {
+  const el = document.getElementById("vcap"); const cap = el ? el.value.trim() : "";
+  idbUpdatePhoto(pid, cap).then(() => { closePhoto(); loadGoalPhotos(id); }).catch(() => closePhoto());
+}
+function closePhoto() { const lay = document.getElementById("vlayer"); if (lay) lay.innerHTML = ""; }
+
+/* Consistencia de una identidad en los últimos 30 días */
+function idnConsistency(id) {
+  const hs = CFG.habits.filter(h => h.idn === id), cs = CFG.commitments.filter(c => c.idn === id);
+  const total = hs.length + cs.length; if (!total) return null;
+  let sum = 0, days = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = addDays(today(), -i), l = LOG[d]; if (!l) continue;
+    const done = hs.filter(h => l.habits && l.habits[h.id]).length + cs.filter(c => l.commitments && l.commitments[c.id]).length;
+    sum += done / total; days++;
+  }
+  return days ? Math.round(sum / days * 100) : 0;
+}
 
 function openGoal(id) {
-  const g = getIdn(id);
-  const items = CFG.habits.filter(h => h.idn === id).map(h => "· " + h.name).concat(CFG.commitments.filter(c => c.idn === id).map(c => "· " + c.name));
-  sheet(`<span class="gicon" style="width:48px;height:48px;background:${g.raw}22;color:${g.raw};display:flex;align-items:center;justify-content:center;border-radius:13px">${icon(g.icon)}</span>
-    <h3 style="margin-top:10px">${esc(g.label)}</h3><div class="mm">Mi para qué</div><div style="font-size:15px;line-height:1.5">${esc(g.why)}</div>
-    <div class="lbl">Recordatorios de identidad</div>${(g.quotes || []).map(q => `<div class="quote">${esc(q)}</div>`).join("") || `<div class="empty">Sin frases</div>`}
-    <div class="lbl">Lo que vota por esta identidad</div><div style="font-size:14px;color:var(--muted)">${items.map(esc).join("<br>") || "—"}</div>
-    <div class="lbl">Vision board</div>
-    <div id="vboard" class="vgrid"><div class="empty" style="grid-column:1/-1">Cargando...</div></div>
-    <label class="addbtn">${icon("plus")} Agregar foto<input type="file" accept="image/*" style="display:none" onchange="addGoalPhoto('${id}',this)"></label>
-    <button class="btn p" onclick="openEditIdentity('${id}')">Editar meta</button><button class="btn g" onclick="closeModal()">Cerrar</button>`);
+  const g = getIdn(id), l = day(today());
+  const hs = CFG.habits.filter(h => h.idn === id), cs = CFG.commitments.filter(c => c.idn === id);
+  const total = hs.length + cs.length;
+  const done = hs.filter(h => l.habits[h.id]).length + cs.filter(c => l.commitments[c.id]).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const cons = idnConsistency(id);
+  const bestStreak = cs.length ? Math.max(...cs.map(c => streak(c.id))) : 0;
+  const c0 = 2 * Math.PI * 30;
+  const quotes = g.quotes || [];
+  modal.innerHTML = `<div class="goalview" style="--acc:${g.raw}">
+    <div class="gv-scroll">
+      <div class="gv-hero">
+        <button class="gv-close" onclick="closeModal()">${icon("close")}</button>
+        <div class="gv-glow"></div>
+        <div class="gv-badge">${icon(g.icon)}</div>
+        <div class="gv-eyebrow">Estoy construyendo a</div>
+        <h1 class="gv-title">${esc(g.label)}</h1>
+        <div class="gv-ring">
+          <svg width="72" height="72"><circle cx="36" cy="36" r="30" stroke="rgba(255,255,255,.12)" stroke-width="5" fill="none"/>
+          <circle cx="36" cy="36" r="30" stroke="${g.raw}" stroke-width="5" fill="none" stroke-linecap="round" stroke-dasharray="${c0}" stroke-dashoffset="${c0 * (1 - pct / 100)}" transform="rotate(-90 36 36)"/></svg>
+          <span>${pct}%</span></div>
+        <div class="gv-stats">
+          <div><b>${done}/${total}</b><span>hoy</span></div>
+          ${cons !== null ? `<div><b>${cons}%</b><span>últimos 30 días</span></div>` : ""}
+          ${bestStreak ? `<div><b>${bestStreak}</b><span>días de racha</span></div>` : ""}
+        </div>
+      </div>
+
+      ${g.why ? `<section class="gv-sec"><div class="gv-label">Mi para qué</div><blockquote class="gv-why">${esc(g.why)}</blockquote></section>` : ""}
+
+      ${quotes.length ? `<section class="gv-sec"><div class="gv-label">Recordatorios</div>
+        <div class="gv-quotes">${quotes.map(q => `<div class="gv-quote"><span class="gv-qmark">"</span>${esc(q)}</div>`).join("")}</div></section>` : ""}
+
+      <section class="gv-sec"><div class="gv-label">Vision board</div>
+        <div id="vboard" class="vgrid"><div class="vempty"><span>Cargando...</span></div></div>
+        <label class="gv-addphoto">${icon("plus")} Agregar imagen<input type="file" accept="image/*" style="display:none" onchange="addGoalPhoto('${id}',this)"></label>
+      </section>
+
+      ${total ? `<section class="gv-sec"><div class="gv-label">Lo que vota por esta identidad</div>
+        <div class="gv-votes">${hs.map(h => `<span class="gv-vote ${l.habits[h.id] ? "on" : ""}">${l.habits[h.id] ? icon("check") : ""}${esc(h.name)}</span>`).join("")}
+        ${cs.map(c => `<span class="gv-vote ${l.commitments[c.id] ? "on" : ""}">${l.commitments[c.id] ? icon("check") : ""}${esc(c.name)}</span>`).join("")}</div></section>` : ""}
+
+      <div class="gv-actions">
+        <button class="gv-btn primary" onclick="openEditIdentity('${id}')">Editar meta</button>
+        <button class="gv-btn" onclick="closeModal()">Cerrar</button>
+      </div>
+    </div>
+    <div id="vlayer"></div>
+  </div>`;
   loadGoalPhotos(id);
 }
 

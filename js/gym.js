@@ -122,7 +122,7 @@ function getActiveWorkout() {
 }
 function savePlayerState() {
   if (!PLAYER) return;
-  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed() }));
+  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx }));
 }
 function clearActive() { store.set("mt_activeWorkout", ""); }
 
@@ -140,7 +140,12 @@ function beginWorkout(rid) {
 function resumeWorkout() {
   const a = getActiveWorkout(); if (!a) return render();
   const r = CFG.routines.find(x => x.id === a.rid); if (!r) { clearActive(); return render(); }
-  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase === "rest" ? "set" : a.phase, remaining: 0, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [] };
+  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx };
+  // Si estaba descansando: continúa el conteo real; si ya venció mientras no estabas, suena la alarma.
+  if (PLAYER.phase === "rest" || PLAYER.phase === "alarm") {
+    if (PLAYER.restEnd && restLeft() > 0) { PLAYER.phase = "rest"; PLAYER.timer = setInterval(tick, 500); }
+    else { PLAYER.phase = "alarm"; startAlarm(); }
+  }
   requestWake(); renderPlayer();
 }
 function openResumeChoice(rid) {
@@ -179,7 +184,7 @@ function finalizeActive() {
   const log = a.log || [];
   if (!log.length) { discardActive(); return; } // nada registrado -> como descartar
   const vol = log.reduce((acc, s) => { const w = parseFloat(s.weight), rp = parseInt(s.reps); return acc + (isNaN(w) || isNaN(rp) ? 0 : w * rp); }, 0);
-  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: a.rid, name: r ? r.name : "Entreno", duration: a.elapsedBase || 0, volume: vol, sets: log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
+  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: a.rid, name: r ? r.name : "Entreno", duration: a.elapsedBase || 0, volume: vol, unit: weightUnit(), sets: log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
   saveWorkouts();
   const l = day(today()); const gh = CFG.habits.find(h => h.id === "gym") || CFG.habits.find(h => /gym|entren/i.test(h.name)); if (gh) l.habits[gh.id] = true; saveLog();
   clearActive(); closeModal(); render();
@@ -190,42 +195,109 @@ function requestWake() { try { if (navigator.wakeLock) navigator.wakeLock.reques
 function buzz() { try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) {} }
 function elapsed() { const P = PLAYER; return (P.elapsedBase || 0) + Math.floor((Date.now() - P.start) / 1000); }
 
-function prefillFor(exName, si) {
-  // 1) misma sesión: última serie registrada de este ejercicio
+/* ---------- Unidad de peso (kg / lb) ---------- */
+function weightUnit() { return (CFG.settings && CFG.settings.unit) || "kg"; }
+function setWeightUnit(u) { CFG.settings.unit = u; saveCfg(); render(); }
+
+/* ---------- Alarma (sonido + vibración, hasta detenerla) ---------- */
+const ALARM = { ctx: null, osc: null, gain: null, vib: null, on: false };
+function primeAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    if (!ALARM.ctx) ALARM.ctx = new AC();
+    if (ALARM.ctx.state === "suspended") ALARM.ctx.resume();
+    // "desbloquea" el audio en iOS con un pulso mudo dentro del gesto del usuario
+    const g = ALARM.ctx.createGain(); g.gain.value = 0;
+    const o = ALARM.ctx.createOscillator(); o.connect(g); g.connect(ALARM.ctx.destination);
+    o.start(); o.stop(ALARM.ctx.currentTime + 0.01);
+  } catch (e) {}
+}
+function startAlarm() {
+  if (ALARM.on) return; ALARM.on = true;
+  try {
+    if (ALARM.ctx) {
+      if (ALARM.ctx.state === "suspended") ALARM.ctx.resume();
+      const ctx = ALARM.ctx;
+      ALARM.gain = ctx.createGain(); ALARM.gain.gain.value = 0.0001; ALARM.gain.connect(ctx.destination);
+      ALARM.osc = ctx.createOscillator(); ALARM.osc.type = "sine"; ALARM.osc.frequency.value = 880;
+      ALARM.osc.connect(ALARM.gain); ALARM.osc.start();
+      // patrón de bips: sube y baja el volumen cada 0.35 s
+      const t0 = ctx.currentTime;
+      for (let i = 0; i < 600; i++) {
+        const t = t0 + i * 0.7;
+        ALARM.gain.gain.setValueAtTime(0.35, t);
+        ALARM.gain.gain.setValueAtTime(0.0001, t + 0.35);
+      }
+    }
+  } catch (e) {}
+  try { if (navigator.vibrate) { navigator.vibrate([600, 300, 600, 300]); ALARM.vib = setInterval(() => { try { navigator.vibrate([600, 300, 600, 300]); } catch (_) {} }, 1800); } } catch (e) {}
+}
+function stopAlarm() {
+  ALARM.on = false;
+  try { if (ALARM.osc) { ALARM.osc.stop(); ALARM.osc.disconnect(); } } catch (e) {}
+  try { if (ALARM.gain) ALARM.gain.disconnect(); } catch (e) {}
+  ALARM.osc = null; ALARM.gain = null;
+  if (ALARM.vib) { clearInterval(ALARM.vib); ALARM.vib = null; }
+  try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) {}
+}
+function dismissAlarm() {
+  stopAlarm();
+  const P = PLAYER; if (!P) return;
+  P.phase = "set"; P.restEnd = null; renderPlayer();
+}
+
+/* ---------- Registro de series ---------- */
+function prefillFor(exName) {
   for (let i = PLAYER.log.length - 1; i >= 0; i--) if (normName(PLAYER.log[i].exName) === normName(exName)) return { weight: PLAYER.log[i].weight, reps: PLAYER.log[i].reps };
-  // 2) historial: última vez que lo hiciste
   const lp = lastPerf(exName); if (lp) return { weight: lp.weight, reps: lp.reps };
   return { weight: "", reps: "" };
 }
 function logCurrentSet() {
   const P = PLAYER, ex = P.r.exercises[P.ei];
   const w = document.getElementById("plW"), r = document.getElementById("plR");
-  P.log.push({ exName: ex.name, set: P.si, weight: w ? w.value.trim() : "", reps: r ? r.value.trim() : "" });
+  P.log.push({ exName: ex.name, set: P.si, weight: w ? w.value.trim() : "", reps: r ? r.value.trim() : "", unit: weightUnit() });
+  P.lastIdx = P.log.length - 1;
+}
+/* Editar la serie recién registrada mientras corre el descanso */
+function editLoggedSet(which, val) {
+  const P = PLAYER; if (!P || P.lastIdx == null || !P.log[P.lastIdx]) return;
+  P.log[P.lastIdx][which] = val.trim(); savePlayerState();
 }
 function renderPlayer() {
   const P = PLAYER, r = P.r, ex = r.exercises[P.ei], next = r.exercises[P.ei + 1];
   const topbar = `<div class="pl-top"><button class="pl-x" onclick="closePlayer()">${icon("close")}</button>
     <div class="pl-prog">${esc(r.name)} · ${P.ei + 1}/${r.exercises.length}</div><div class="pl-elapsed">${fmtTime(elapsed())}</div></div>`;
   let body = "";
+  const U = weightUnit();
   if (P.phase === "set") {
-    const last = P.si >= ex.sets, pf = prefillFor(ex.name, P.si), lp = lastPerf(ex.name);
+    const last = P.si >= ex.sets, pf = prefillFor(ex.name), lp = lastPerf(ex.name);
     body = `<div class="pl-mid">
       <div class="pl-ex">${esc(ex.name)}</div>
       <div class="pl-set">Serie ${P.si} de ${ex.sets}</div>
       <div class="pl-reps">objetivo: ${esc(ex.reps)} reps${ex.weight ? " · " + esc(ex.weight) : ""}</div>
       ${ex.note ? `<div class="pl-note">${esc(ex.note)}</div>` : ""}
-      <div class="pl-log"><div><label>Peso (kg)</label><input id="plW" inputmode="decimal" value="${esc(pf.weight)}" placeholder="—"></div>
+      <div class="pl-log"><div><label>Peso (${U})</label><input id="plW" inputmode="decimal" value="${esc(pf.weight)}" placeholder="—"></div>
         <div><label>Reps</label><input id="plR" inputmode="numeric" value="${esc(pf.reps)}" placeholder="${esc(ex.reps)}"></div></div>
-      ${lp ? `<div class="pl-last">Última vez: ${esc(lp.weight) || "—"} kg × ${esc(lp.reps) || "—"}</div>` : ""}
+      ${lp ? `<div class="pl-last">Última vez: ${esc(lp.weight) || "—"} ${U} × ${esc(lp.reps) || "—"}</div>` : ""}
     </div>
     <div class="pl-actions">
       ${last ? `<button class="pl-primary" onclick="afterLastSet()">Terminar ejercicio</button>` : `<button class="pl-primary" onclick="startRest()">${icon("play")} Registrar y descansar ${ex.rest}s</button>`}
       <div class="pl-sub">Anota lo que hiciste y presiona el botón</div>
     </div>`;
   } else if (P.phase === "rest") {
-    body = `<div class="pl-mid"><div class="pl-restlbl">Descanso</div><div class="pl-timer" id="ptime">${fmtTime(P.remaining)}</div>
-      <div class="pl-next">Sigue: Serie ${P.si} de ${ex.sets} · ${esc(ex.name)}</div></div>
+    const s = P.log[P.lastIdx] || { weight: "", reps: "" };
+    body = `<div class="pl-mid"><div class="pl-restlbl">Descanso</div><div class="pl-timer" id="ptime">${fmtTime(restLeft())}</div>
+      <div class="pl-next">Sigue: Serie ${P.si} de ${ex.sets} · ${esc(ex.name)}</div>
+      <div class="pl-logrest"><div class="pl-logtitle">Serie anterior · puedes ajustarla</div>
+        <div class="pl-log"><div><label>Peso (${U})</label><input inputmode="decimal" value="${esc(s.weight)}" placeholder="—" onchange="editLoggedSet('weight',this.value)"></div>
+          <div><label>Reps</label><input inputmode="numeric" value="${esc(s.reps)}" placeholder="—" onchange="editLoggedSet('reps',this.value)"></div></div></div>
+    </div>
     <div class="pl-actions"><div class="pl-restctl"><button onclick="addRest(-15)">-15s</button><button onclick="addRest(15)">+15s</button><button onclick="skipRest()">${icon("skipfwd")} Saltar</button></div></div>`;
+  } else if (P.phase === "alarm") {
+    body = `<div class="pl-mid"><div class="pl-restlbl">Descanso terminado</div>
+      <div class="pl-timer alarm">0:00</div>
+      <div class="pl-next big">Serie ${P.si} de ${ex.sets}</div><div class="pl-next">${esc(ex.name)}</div></div>
+    <div class="pl-actions"><button class="pl-primary alarmbtn" onclick="dismissAlarm()">Detener alarma</button></div>`;
   } else if (P.phase === "transition") {
     body = `<div class="pl-mid"><div class="pl-done">${icon("check")}</div><div class="pl-ex">Terminaste ${esc(ex.name)}</div>
       <div class="pl-next big">Sigue: ${esc(next.name)}</div><div class="pl-summary">${next.sets} series × ${esc(next.reps)} reps · descanso ${next.rest}s${next.weight ? " · " + esc(next.weight) : ""}</div></div>
@@ -237,23 +309,43 @@ function renderPlayer() {
       <div class="pl-note">Un voto más por el cuerpo que quieres.</div></div>
     <div class="pl-actions"><button class="pl-primary" onclick="finishWorkout()">Guardar entreno</button></div>`;
   }
-  modal.innerHTML = `<div class="player">${topbar}${body}</div>`;
+  modal.innerHTML = `<div class="player${P.phase === "alarm" ? " alarming" : ""}">${topbar}${body}</div>`;
   savePlayerState();
 }
+
+/* ---------- Temporizador basado en reloj real (sobrevive bloqueo/segundo plano) ---------- */
+function restLeft() { const P = PLAYER; if (!P || !P.restEnd) return 0; return Math.max(0, Math.round((P.restEnd - Date.now()) / 1000)); }
 function startRest() {
   const P = PLAYER, ex = P.r.exercises[P.ei];
+  primeAudio(); // el tap del usuario habilita el sonido de la alarma
   logCurrentSet();
-  P.phase = "rest"; P.remaining = ex.rest; P.si++;
-  clearInterval(P.timer); P.timer = setInterval(tick, 1000); renderPlayer();
+  P.phase = "rest"; P.restEnd = Date.now() + ex.rest * 1000; P.si++;
+  clearInterval(P.timer); P.timer = setInterval(tick, 500); renderPlayer();
 }
 function tick() {
   const P = PLAYER; if (!P) return;
-  P.remaining--;
-  const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(Math.max(0, P.remaining));
-  if (P.remaining <= 0) { clearInterval(P.timer); buzz(); P.phase = "set"; renderPlayer(); }
+  if (P.phase !== "rest") return;
+  const left = restLeft();
+  const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(left);
+  if (left <= 0) { clearInterval(P.timer); P.timer = null; P.phase = "alarm"; startAlarm(); renderPlayer(); }
 }
-function addRest(s) { const P = PLAYER; P.remaining = Math.max(1, P.remaining + s); const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(P.remaining); }
-function skipRest() { const P = PLAYER; clearInterval(P.timer); P.phase = "set"; renderPlayer(); }
+function addRest(s) {
+  const P = PLAYER; if (!P.restEnd) return;
+  P.restEnd = Math.max(Date.now() + 1000, P.restEnd + s * 1000);
+  const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(restLeft());
+  savePlayerState();
+}
+function skipRest() { const P = PLAYER; clearInterval(P.timer); P.timer = null; P.restEnd = null; stopAlarm(); P.phase = "set"; renderPlayer(); }
+/* Al volver a la app: recalcula el tiempo transcurrido en segundo plano */
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !PLAYER) return;
+    if (PLAYER.phase === "rest") {
+      if (restLeft() <= 0) { clearInterval(PLAYER.timer); PLAYER.timer = null; PLAYER.phase = "alarm"; startAlarm(); }
+      renderPlayer();
+    }
+  });
+}
 function afterLastSet() {
   const P = PLAYER; logCurrentSet();
   if (P.ei < P.r.exercises.length - 1) { P.phase = "transition"; renderPlayer(); }
@@ -263,7 +355,7 @@ function continueNext() { const P = PLAYER; P.ei++; P.si = 1; P.phase = "set"; r
 function finishWorkout() {
   const P = PLAYER;
   const vol = P.log.reduce((a, s) => { const w = parseFloat(s.weight), r = parseInt(s.reps); return a + (isNaN(w) || isNaN(r) ? 0 : w * r); }, 0);
-  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: P.r.id, name: P.r.name, duration: elapsed(), volume: vol, sets: P.log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
+  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: P.r.id, name: P.r.name, duration: elapsed(), volume: vol, unit: weightUnit(), sets: P.log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
   saveWorkouts();
   const l = day(today());
   const gh = CFG.habits.find(h => h.id === "gym") || CFG.habits.find(h => /gym|entren/i.test(h.name));
@@ -271,6 +363,7 @@ function finishWorkout() {
   clearActive(); cleanupPlayer(); render();
 }
 function cleanupPlayer() {
+  stopAlarm();
   if (PLAYER) { clearInterval(PLAYER.timer); try { if (PLAYER.wake) PLAYER.wake.release(); } catch (e) {} }
   PLAYER = null; closeModal();
 }
