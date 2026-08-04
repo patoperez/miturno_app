@@ -22,6 +22,7 @@ function loadCfg() {
   if (!c.settings.mealView) c.settings.mealView = "menu";
   if (!c.settings.notif) c.settings.notif = JSON.parse(JSON.stringify(DEFAULT_CFG.settings.notif));
   c.identities = c.identities || []; c.habits = c.habits || []; c.commitments = c.commitments || [];
+  c.metrics = c.metrics || [];
   if (!c.meals) c.meals = JSON.parse(JSON.stringify(DEFAULT_CFG.meals));
   c.meals.menu = c.meals.menu || [];
   c.meals.fichas = c.meals.fichas || JSON.parse(JSON.stringify(DEFAULT_CFG.meals.fichas));
@@ -63,8 +64,8 @@ let LOG = loadLog(), TASKS = loadTasks(), WORKOUTS = loadWorkouts();
 let VIEW = "hoy";
 let PROG = store.get("mt_prog") || "semana"; // semana | mes | bitacora
 let CALYM = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
-const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_rt: true, w_act: true };
-const DEFAULT_HOY_ORDER = ["hab", "com", "gym", "meal", "task", "next", "sleep", "mood", "journal"];
+const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_rt: true, w_act: true, p_met: true };
+const DEFAULT_HOY_ORDER = ["review", "hab", "com", "gym", "meal", "metric", "task", "next", "sleep", "mood", "journal"];
 let HOY_ORDER = (() => {
   let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; }
   if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice();
@@ -78,13 +79,15 @@ function day(d) {
   if (!LOG[d]) LOG[d] = {};
   const l = LOG[d];
   l.habits = l.habits || {}; l.commitments = l.commitments || {}; l.notes = l.notes || {};
-  l.menuDone = l.menuDone || {}; l.fichas = l.fichas || {}; l.inneg = l.inneg || {};
+  l.menuDone = l.menuDone || {}; l.fichas = l.fichas || {}; l.inneg = l.inneg || {}; l.metrics = l.metrics || {};
   if (l.sleep === undefined) l.sleep = null; if (l.mood === undefined) l.mood = null; if (l.journal === undefined) l.journal = "";
   return l;
 }
 
-/* ---------- Puntos ---------- */
-function mealWeight() { return CFG.meals.menu.length || CFG.meals.fichas.categories.length || 3; }
+/* ---------- Puntos ----------
+   Las métricas NO suman puntos a propósito: son medición, no cumplimiento.
+   Meterlas al puntaje distorsionaría el historial congelado. */
+function mealWeight() { return CFG.meals.menu.length || CFG.meals.fichas.categories.length || 0; }
 function mealScore(d) {
   const l = LOG[d]; if (!l) return 0;
   const M = CFG.meals;
@@ -115,12 +118,26 @@ function freezePastDays() {
   }
   if (changed) saveLog();
 }
-function streak(id) {
+/* Racha de días consecutivos. kind: "commitments" (default) o "habits".
+   Si hoy aún no está marcado, la racha se mide desde ayer: el día en curso
+   no rompe nada hasta que termine. */
+function streak(id, kind) {
+  const K = kind || "commitments";
   let d = today();
-  if (!(LOG[d] && LOG[d].commitments && LOG[d].commitments[id])) d = addDays(d, -1);
+  if (!(LOG[d] && LOG[d][K] && LOG[d][K][id])) d = addDays(d, -1);
   let s = 0;
-  while (LOG[d] && LOG[d].commitments && LOG[d].commitments[id] === true) { s++; d = addDays(d, -1); }
+  while (LOG[d] && LOG[d][K] && LOG[d][K][id] === true) { s++; d = addDays(d, -1); }
   return s;
+}
+/* Hábitos ordenados por hora (los que no tienen hora van al final).
+   Así la lista de Hoy se lee como el día, de arriba abajo. */
+function habitsSorted() {
+  return CFG.habits.slice().sort((a, b) => {
+    const ta = a.time || "", tb = b.time || "";
+    if (ta && tb) return ta.localeCompare(tb);
+    if (ta) return -1; if (tb) return 1;
+    return 0;
+  });
 }
 
 /* ---------- Analítica de workouts ---------- */
@@ -173,8 +190,11 @@ function sec(id, title, meta, body, iconName, iconColor) {
 /* ========================= HOY ========================= */
 function habitRow(h, d) {
   const l = day(d), done = !!l.habits[h.id], idn = getIdn(h.idn), note = l.notes[h.id];
+  const s = (d === today()) ? streak(h.id, "habits") : 0;
+  const sub = `${h.time ? `<span class="hhm">${esc(h.time)}</span>` : ""}<span style="color:${idn.raw}">${esc(idn.label)}</span>`;
   return `<div class="row ${done ? "done" : ""}"><div class="mark" style="${done ? `background:${idn.raw};border-color:${idn.raw}` : ""}" onclick="toggleHabit('${d}','${h.id}')">${icon("check")}</div>
-    <div class="body" onclick="toggleHabit('${d}','${h.id}')"><div class="name">${esc(h.name)}</div><div class="sub"><span style="color:${idn.raw}">${esc(idn.label)}</span></div></div>
+    <div class="body" onclick="toggleHabit('${d}','${h.id}')"><div class="name">${esc(h.name)}</div><div class="sub">${sub}</div></div>
+    ${s >= 2 ? `<span class="streak hot mini">${icon("flame")}${s}</span>` : ""}
     <button class="note-btn ${note ? "has" : ""}" onclick="openNote('${d}','${h.id}')">${icon(note ? "edit" : "plus")}</button></div>`;
 }
 function commitmentRow(c, d) {
@@ -196,8 +216,10 @@ function renderHoy() {
   const d = today(), l = day(d), B = {};
   const doneH = CFG.habits.filter(x => l.habits[x.id]).length;
   B.hab = sec("h_hab", "Hábitos de hoy", `${doneH}/${CFG.habits.length}`,
-    (CFG.habits.length ? CFG.habits.map(x => habitRow(x, d)).join("") : `<div class="empty">Aún no tienes hábitos</div>`)
+    (CFG.habits.length ? habitsSorted().map(x => habitRow(x, d)).join("") : `<div class="empty">Aún no tienes hábitos</div>`)
     + `<button class="addbtn" onclick="openEditHabit()">${icon("plus")} Agregar hábito</button>`, "check", "var(--ok)");
+  B.review = reviewSection(d);
+  B.metric = metricsSection(d);
   const doneC = CFG.commitments.filter(x => l.commitments[x.id]).length;
   B.com = sec("h_com", "Compromisos", `${doneC}/${CFG.commitments.length}`,
     `<div class="empty" style="padding:6px 6px 10px;text-align:left">Marca lo que hoy lograste NO hacer. Cada día limpio suma a tu racha.</div>`
@@ -305,6 +327,120 @@ function openCatalog(cid) {
     <button class="btn g" onclick="closeModal()">Cerrar</button>`);
 }
 
+/* ========================= MÉTRICAS =========================
+   Números que registras cada día (peso, horas de estudio, pantalla...).
+   No suman puntos: son medición, no cumplimiento. */
+function fmtNum(v, unit) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Math.round(Number(v) * 100) / 100;
+  return (isNaN(n) ? "—" : String(n)) + (unit ? `<i>${esc(unit)}</i>` : "");
+}
+function metricVals(id, dates) {
+  return dates.map(d => {
+    const l = LOG[d]; const v = l && l.metrics ? l.metrics[id] : undefined;
+    return (v === undefined || v === null || v === "") ? null : Number(v);
+  });
+}
+function lastNDates(n, endKey) {
+  const end = endKey || today(), out = [];
+  for (let i = n - 1; i >= 0; i--) out.push(addDays(end, -i));
+  return out;
+}
+function metricAvg(id, n, endKey) {
+  const vals = metricVals(id, lastNDates(n, endKey)).filter(v => v !== null);
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+function metricRow(m, d) {
+  const l = day(d), v = l.metrics[m.id], idn = getIdn(m.idn);
+  const has = !(v === undefined || v === null || v === "");
+  const avg = metricAvg(m.id, 7, d);
+  const bits = [];
+  if (avg !== null) bits.push(`prom 7d ${fmtNum(avg, m.unit)}`);
+  if (m.target) bits.push(`meta ${esc(m.target)}`);
+  return `<div class="row" onclick="openMetric('${d}','${m.id}')">
+    <span class="dotc" style="background:${idn.raw}"></span>
+    <div class="body"><div class="name">${esc(m.name)}</div>${bits.length ? `<div class="sub">${bits.join(" · ")}</div>` : ""}</div>
+    <span class="mval ${has ? "on" : ""}">${fmtNum(v, m.unit)}</span></div>`;
+}
+function metricsSection(d) {
+  if (!CFG.metrics.length) return null;
+  const l = day(d);
+  const done = CFG.metrics.filter(m => { const v = l.metrics[m.id]; return !(v === undefined || v === null || v === ""); }).length;
+  return sec("h_met", "Métricas", `${done}/${CFG.metrics.length}`,
+    CFG.metrics.map(m => metricRow(m, d)).join(""), "chart", "var(--ciber)");
+}
+function openMetric(d, id) {
+  const m = CFG.metrics.find(x => x.id === id); if (!m) return;
+  const l = day(d), v = l.metrics[id];
+  const has = !(v === undefined || v === null || v === "");
+  const avg = metricAvg(id, 7, d);
+  sheet(`<h3>${esc(m.name)}</h3><div class="mm">${cap(fmtDate(d))}${avg !== null ? ` · promedio 7 días ${fmtNum(avg, m.unit).replace(/<\/?i>/g, "")}` : ""}</div>
+    <div class="lbl">Valor${m.unit ? " (" + esc(m.unit) + ")" : ""}</div>
+    <input id="mvVal" class="field" type="number" inputmode="decimal" step="any" value="${has ? esc(v) : ""}" placeholder="${m.target ? "Meta: " + esc(m.target) : "Escribe el número"}">
+    <button class="btn p" onclick="saveMetricVal('${d}','${id}')">Guardar</button>
+    ${has ? `<button class="btn g" onclick="clearMetricVal('${d}','${id}')">Quitar valor</button>` : ""}
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+  const el = document.getElementById("mvVal"); if (el) { el.focus(); el.select(); }
+}
+function saveMetricVal(d, id) {
+  const raw = document.getElementById("mvVal").value.trim();
+  const l = day(d);
+  if (raw === "" || isNaN(Number(raw))) delete l.metrics[id]; else l.metrics[id] = Number(raw);
+  saveLog(); closeModal(); render();
+}
+function clearMetricVal(d, id) { const l = day(d); delete l.metrics[id]; saveLog(); closeModal(); render(); }
+
+/* ========================= REVISIÓN SEMANAL =========================
+   Aparece el domingo y sigue disponible el lunes por si se pasó. Los otros
+   cinco días la tarjeta no existe. Siempre se escribe sobre el domingo que
+   cerró la semana, así que el lunes edita el mismo registro, no uno nuevo. */
+function reviewDateFor(d) {
+  const wd = weekdayIdx(d);
+  if (wd === 6) return d;        // domingo: la semana que termina hoy
+  if (wd === 0) return addDays(d, -1); // lunes: la semana que cerró ayer
+  return null;
+}
+function isReviewDay(d) { return reviewDateFor(d) !== null; }
+function weekStatsFor(d) {
+  const wd = []; for (let i = 6; i >= 0; i--) wd.push(addDays(d, -i));
+  const pts = wd.reduce((a, x) => a + pointsFor(x), 0);
+  const max = wd.reduce((a, x) => a + maxFor(x), 0);
+  return { wd, pct: max ? Math.round(pts / max * 100) : 0, workouts: wd.filter(hasWorkout).length };
+}
+function reviewSection(d) {
+  const rd = reviewDateFor(d);
+  if (!rd) return null;
+  const late = rd !== d;
+  const l = day(rd), r = l.review || { worked: "", failed: "", change: "" };
+  const st = weekStatsFor(rd);
+  const mets = CFG.metrics.map(m => {
+    const a = metricAvg(m.id, 7, rd), b = metricAvg(m.id, 7, addDays(rd, -7));
+    if (a === null) return "";
+    const diff = (b === null) ? null : a - b;
+    const col = diff === null ? "var(--muted2)" : (diff > 0 ? "var(--ok)" : diff < 0 ? "var(--cuerpo)" : "var(--muted2)");
+    return `<div class="catrow"><span>${esc(m.name)}</span><span class="amt">${fmtNum(a, m.unit)}${diff !== null ? ` <b style="color:${col}">${diff > 0 ? "+" : ""}${Math.round(diff * 100) / 100}</b>` : ""}</span></div>`;
+  }).join("");
+  const done = hasReview(l);
+  const body = `${late ? `<div class="empty" style="text-align:left;padding:2px 2px 10px">La semana que cerró ayer. Hoy es tu último día para escribirla.</div>` : ""}
+    <div class="statrow"><div class="stat"><b>${st.pct}%</b><span>de la semana</span></div><div class="stat"><b>${st.workouts}</b><span>entrenos</span></div></div>
+    ${mets ? `<div class="subhead2">Tus números</div>${mets}` : ""}
+    <div class="lbl">¿Qué funcionó?</div><textarea id="rvW" placeholder="Lo que sí salió">${esc(r.worked)}</textarea>
+    <div class="lbl">¿Qué falló, y por qué? (causa, no "me dio flojera")</div><textarea id="rvF" placeholder="El mecanismo, no el juicio">${esc(r.failed)}</textarea>
+    <div class="lbl">Un solo cambio para la próxima semana</div><textarea id="rvC" placeholder="Uno. Cambiar cinco cosas destruye el sistema.">${esc(r.change)}</textarea>
+    <button class="btn p" onclick="saveReview('${rd}')">Guardar revisión</button>`;
+  return sec("h_rev", "Revisión de la semana", done ? "Escrita" : (late ? "Último día" : "Domingo"), body, "calendar", "var(--lectura)");
+}
+function saveReview(d) {
+  const l = day(d);
+  l.review = {
+    worked: (document.getElementById("rvW") || {}).value || "",
+    failed: (document.getElementById("rvF") || {}).value || "",
+    change: (document.getElementById("rvC") || {}).value || ""
+  };
+  saveLog(); render();
+}
+
 /* ========================= PROGRESO ========================= */
 function setProg(p) { PROG = p; store.set("mt_prog", p); render(); }
 function monthNav(label) { return `<div class="mnav"><button onclick="calPrev()">${icon("chevleft")}</button><b>${label}</b><button onclick="calNext()">${icon("chevright")}</button></div>`; }
@@ -348,21 +484,68 @@ function renderProgreso() {
   if (PROG === "semana") {
     const wd = weekDates(), names = ["L","M","M","J","V","S","D"];
     const head = `<thead><tr><th></th>${wd.map((d, i) => `<th>${names[i]}<br><span style="color:var(--muted2)">${d.slice(8)}</span></th>`).join("")}</tr></thead>`;
-    const rows = (CFG.habits.length ? `<tr><td class="subhead" colspan="8">Hábitos</td></tr>${weekRows(CFG.habits, "habit")}` : "")
+    const rows = (CFG.habits.length ? `<tr><td class="subhead" colspan="8">Hábitos</td></tr>${weekRows(habitsSorted(), "habit")}` : "")
       + (CFG.commitments.length ? `<tr><td class="subhead" colspan="8">Compromisos</td></tr>${weekRows(CFG.commitments, "commit")}` : "");
     out += sec("p_grid", "Hábitos × 7 días", "", `<table class="grid">${head}<tbody>${rows}</tbody></table>`, "grid");
     out += sec("p_chart", "Línea de progreso semanal", "", `<canvas id="chart" width="600" height="200" style="width:100%;height:auto;margin-top:8px"></canvas>`, "chart", "var(--ok)");
+    out += metricsProgreso(wd);
     app.innerHTML = out;
     drawChart(wd.map(pointsFor), (new Date().getDay() + 6) % 7);
+    drawMetricSparks(wd);
   } else if (PROG === "mes") {
+    const y = CALYM.y, m = CALYM.m, days = new Date(y, m + 1, 0).getDate(), vals = [], mdates = [];
+    for (let dn = 1; dn <= days; dn++) {
+      const ds = `${y}-${String(m + 1).padStart(2, "0")}-${String(dn).padStart(2, "0")}`;
+      mdates.push(ds); vals.push(pointsFor(ds));
+    }
     out += sec("p_cal", "Calendario", "", unifiedMonth(), "calendar", "var(--ok)");
     out += sec("p_chart", "Línea de progreso del mes", "", `<canvas id="chart" width="600" height="200" style="width:100%;height:auto;margin-top:8px"></canvas>`, "chart", "var(--ok)");
+    out += metricsProgreso(mdates);
     app.innerHTML = out;
-    const y = CALYM.y, m = CALYM.m, days = new Date(y, m + 1, 0).getDate(), vals = [];
-    for (let dn = 1; dn <= days; dn++) vals.push(pointsFor(`${y}-${String(m + 1).padStart(2, "0")}-${String(dn).padStart(2, "0")}`));
     const tdy = (today().slice(0, 7) === `${y}-${String(m + 1).padStart(2, "0")}`) ? new Date().getDate() - 1 : days - 1;
     drawChart(vals, tdy);
+    drawMetricSparks(mdates);
   } else { out += bitacoraList(); app.innerHTML = out; }
+}
+/* Tendencia de métricas: una fila por métrica con promedio, cambio vs. el
+   periodo anterior y una línea chiquita. Sección colapsada por defecto
+   para no meter ruido a quien no usa métricas. */
+function metricsProgreso(dates) {
+  if (!CFG.metrics.length) return "";
+  const body = CFG.metrics.map(m => {
+    const vals = metricVals(m.id, dates), got = vals.filter(v => v !== null);
+    const avg = got.length ? got.reduce((a, b) => a + b, 0) / got.length : null;
+    const prev = metricVals(m.id, dates.map(d => addDays(d, -dates.length))).filter(v => v !== null);
+    const pavg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : null;
+    const diff = (avg !== null && pavg !== null) ? Math.round((avg - pavg) * 100) / 100 : null;
+    const idn = getIdn(m.idn);
+    return `<div class="metrow">
+      <div class="metrow-h"><span class="dotc" style="background:${idn.raw}"></span>
+        <b>${esc(m.name)}</b>
+        <span class="amt">${avg === null ? "sin datos" : "prom " + fmtNum(avg, m.unit)}${diff !== null ? ` <i style="color:${diff > 0 ? "var(--ok)" : diff < 0 ? "var(--cuerpo)" : "var(--muted2)"}">${diff > 0 ? "+" : ""}${diff}</i>` : ""}</span></div>
+      <canvas class="spark" id="sp_${m.id}" width="600" height="90"></canvas></div>`;
+  }).join("");
+  return sec("p_met", "Métricas", String(CFG.metrics.length), body, "chart", "var(--ciber)");
+}
+function drawMetricSparks(dates) {
+  CFG.metrics.forEach(m => {
+    const cv = document.getElementById("sp_" + m.id); if (!cv) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    const vals = metricVals(m.id, dates), got = vals.filter(v => v !== null);
+    const W = cv.width, H = cv.height, pad = 12;
+    ctx.clearRect(0, 0, W, H);
+    if (!got.length) return;
+    let lo = Math.min.apply(null, got), hi = Math.max.apply(null, got);
+    if (hi === lo) { hi = lo + 1; lo = lo - 1; }
+    const col = getIdn(m.idn).raw;
+    const xs = i => vals.length > 1 ? pad + (W - 2 * pad) * (i / (vals.length - 1)) : W / 2;
+    const ys = v => H - pad - (H - 2 * pad) * ((v - lo) / (hi - lo));
+    ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.beginPath();
+    let started = false;
+    vals.forEach((v, i) => { if (v === null) return; const x = xs(i), y = ys(v); if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y); });
+    ctx.stroke(); ctx.fillStyle = col;
+    vals.forEach((v, i) => { if (v === null) return; ctx.beginPath(); ctx.arc(xs(i), ys(v), 3, 0, 7); ctx.fill(); });
+  });
 }
 function drawChart(vals, todayIdx) {
   const cv = document.getElementById("chart"); if (!cv) return;
@@ -377,14 +560,21 @@ function drawChart(vals, todayIdx) {
   ctx.stroke(); ctx.fillStyle = "#22C55E";
   vals.forEach((v, i) => { if (i > todayIdx) return; ctx.beginPath(); ctx.arc(xs(i), ys(v), 3.5, 0, 7); ctx.fill(); });
 }
+function hasReview(l) { return !!(l && l.review && (l.review.worked || l.review.failed || l.review.change)); }
 function bitacoraList() {
-  const days = Object.keys(LOG).filter(d => LOG[d].journal || LOG[d].mood).sort().reverse();
+  const days = Object.keys(LOG).filter(d => LOG[d].journal || LOG[d].mood || hasReview(LOG[d])).sort().reverse();
   return days.length ? days.map(d => {
-    const l = LOG[d];
+    const l = LOG[d], r = l.review || {};
+    const rev = hasReview(l) ? `<div class="revblock">
+      <div class="subhead2" style="padding-top:4px">Revisión de la semana</div>
+      ${r.worked ? `<div class="revq">Qué funcionó</div><div class="reva">${esc(r.worked)}</div>` : ""}
+      ${r.failed ? `<div class="revq">Qué falló y por qué</div><div class="reva">${esc(r.failed)}</div>` : ""}
+      ${r.change ? `<div class="revq">El cambio</div><div class="reva">${esc(r.change)}</div>` : ""}</div>` : "";
     return `<div class="sec"><div class="sec-b" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <b style="text-transform:capitalize;cursor:pointer" onclick="openDay('${d}')">${fmtDate(d)}</b>
       ${l.mood ? `<span class="streak" style="background:${moodColor(l.mood)};color:#0E0F13;border:none">${l.mood}/10</span>` : ""}</div>
-      ${l.journal ? `<div style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : `<div class="empty">Sin nota</div>`}
+      ${l.journal ? `<div style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : (rev ? "" : `<div class="empty">Sin nota</div>`)}
+      ${rev}
       <div class="sub" style="margin-top:8px;font-size:12px;color:var(--muted2)">${Math.round(pointsFor(d))} puntos${l.sleep ? " · " + l.sleep + " de sueño" : ""}</div></div></div>`;
   }).join("") : `<div class="empty" style="padding:40px">Tu bitácora aparecerá aquí conforme escribas cada día.</div>`;
 }
@@ -590,6 +780,12 @@ function renderAjustes() {
     (CFG.habits.map(i => manageRow(i, "habit")).join("") || `<div class="empty">Ninguno</div>`) + `<button class="addbtn" onclick="openEditHabit()">${icon("plus")} Nuevo hábito</button>`, "check", "var(--ok)");
   out += sec("a_com", "Compromisos", String(CFG.commitments.length),
     (CFG.commitments.map(i => manageRow(i, "commit")).join("") || `<div class="empty">Ninguno</div>`) + `<button class="addbtn" onclick="openEditCommit()">${icon("plus")} Nuevo compromiso</button>`, "flame", "var(--ok)");
+  out += sec("a_met", "Métricas", String(CFG.metrics.length),
+    (CFG.metrics.map(m => {
+      const idn = getIdn(m.idn);
+      return `<div class="row" onclick="openEditMetric('${m.id}')"><span class="dotc" style="background:${idn.raw}"></span><div class="body"><div class="name">${esc(m.name)}</div><div class="sub">${m.unit ? esc(m.unit) : "sin unidad"}${m.target ? " · meta " + esc(m.target) : ""}</div></div><button class="note-btn">${icon("edit")}</button></div>`;
+    }).join("") || `<div class="empty">Ninguna. Sirven para registrar números: peso, horas de estudio, pantalla.</div>`)
+    + `<button class="addbtn" onclick="openEditMetric()">${icon("plus")} Nueva métrica</button>`, "chart", "var(--ciber)");
   let mealsBody = `<div class="lbl" style="margin-top:2px">Sistema de comidas (solo se muestra el que elijas)</div>
     <div class="seg small"><button class="${mv === "menu" ? "on" : ""}" onclick="setMealView('menu')">Menú</button><button class="${mv === "fichas" ? "on" : ""}" onclick="setMealView('fichas')">Fichas</button></div>`;
   if (mv === "menu") {
@@ -607,7 +803,12 @@ function renderAjustes() {
   mealsBody += `<div style="height:6px"></div><button class="addbtn" onclick="openImportMeals()">${icon("upload")} Importar comidas (JSON)</button><button class="addbtn" onclick="exportMeals()">${icon("download")} Exportar comidas (JSON)</button>`;
   out += sec("a_meals", "Comidas", mv === "menu" ? "Menú" : "Fichas", mealsBody, "meal", "var(--cuerpo)");
   out += sec("a_data", "Datos y respaldo", "",
-    `<div class="empty" style="text-align:left;padding:4px 2px 10px">Descarga un archivo con TODOS tus datos (config, historial, tareas y entrenos). Guárdalo por si cambias de dispositivo o de dominio.</div>
+    `<div class="subhead2" style="padding-top:2px">Plan</div>
+     <div class="empty" style="text-align:left;padding:0 2px 8px">Metas, hábitos, compromisos y métricas en un solo JSON. No toca tu historial.</div>
+     <button class="addbtn" onclick="openImportPlan()">${icon("upload")} Importar plan (JSON)</button>
+     <button class="addbtn" onclick="exportPlan()">${icon("download")} Exportar plan (JSON)</button>
+     <div class="subhead2">Respaldo completo</div>
+     <div class="empty" style="text-align:left;padding:0 2px 8px">Un archivo con TODOS tus datos (config, historial, tareas y entrenos). Guárdalo por si cambias de dispositivo o de dominio.</div>
      <button class="addbtn" onclick="exportAllData()">${icon("download")} Descargar respaldo</button>
      <button class="addbtn" onclick="openImportData()">${icon("upload")} Restaurar respaldo</button>`, "sliders", "var(--muted)");
   if (typeof cloudSection === "function") out += cloudSection();
@@ -846,18 +1047,49 @@ function delIdentity(id) { CFG.identities = CFG.identities.filter(i => i.id !== 
 
 function itemEditor(kind, id) {
   const list = kind === "habit" ? CFG.habits : CFG.commitments;
-  const editing = !!id, it = editing ? list.find(x => x.id === id) : { name: "", idn: null };
+  const editing = !!id, it = editing ? list.find(x => x.id === id) : { name: "", idn: null, time: "" };
   _tidn = it.idn; const title = kind === "habit" ? "hábito" : "compromiso";
   sheet(`<h3>${editing ? "Editar " + title : "Nuevo " + title}</h3><div class="mm">${kind === "habit" ? "Algo que quieres hacer" : "Algo que quieres dejar (lleva racha)"}</div>
     <div class="lbl">Nombre</div><input id="iName" class="field" value="${esc(it.name)}" placeholder="${kind === "habit" ? "Ej: Leer 20 minutos" : "Ej: Sin azúcar"}">
-    <div class="lbl">¿Conectado a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(it.idn)}</div>
+    ${kind === "habit" ? `<div class="lbl">Hora (opcional · ordena tu lista de hoy)</div><input id="iTime" class="field" type="time" value="${esc(it.time || "")}">` : ""}
+    ${CFG.identities.length ? `<div class="lbl">¿Conectado a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(it.idn)}</div>` : ""}
     <button class="btn p" onclick="saveItem('${kind}','${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delItem('${kind}','${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function openEditHabit(id) { itemEditor("habit", id); }
 function openEditCommit(id) { itemEditor("commit", id); }
-function saveItem(kind, id) { const name = document.getElementById("iName").value.trim(); if (!name) return; freezePastDays(); const list = kind === "habit" ? CFG.habits : CFG.commitments; if (id) { const it = list.find(x => x.id === id); it.name = name; it.idn = _tidn; } else list.push({ id: uid(kind), name, idn: _tidn }); _tidn = null; saveCfg(); closeModal(); render(); }
+function saveItem(kind, id) {
+  const name = document.getElementById("iName").value.trim(); if (!name) return;
+  freezePastDays();
+  const tEl = document.getElementById("iTime"), time = tEl ? tEl.value : "";
+  const list = kind === "habit" ? CFG.habits : CFG.commitments;
+  if (id) { const it = list.find(x => x.id === id); it.name = name; it.idn = _tidn; if (kind === "habit") it.time = time; }
+  else { const nu = { id: uid(kind), name, idn: _tidn }; if (kind === "habit") nu.time = time; list.push(nu); }
+  _tidn = null; saveCfg(); closeModal(); render();
+}
 function delItem(kind, id) { freezePastDays(); if (kind === "habit") CFG.habits = CFG.habits.filter(x => x.id !== id); else CFG.commitments = CFG.commitments.filter(x => x.id !== id); saveCfg(); closeModal(); render(); }
+
+/* ---------- Métricas (editor) ---------- */
+function openEditMetric(id) {
+  const editing = !!id, it = editing ? CFG.metrics.find(x => x.id === id) : { name: "", unit: "", target: "", idn: null };
+  _tidn = it.idn;
+  sheet(`<h3>${editing ? "Editar métrica" : "Nueva métrica"}</h3><div class="mm">Un número que registras cada día. No suma puntos: sirve para ver tendencias.</div>
+    <div class="lbl">Nombre</div><input id="qName" class="field" value="${esc(it.name)}" placeholder="Ej: Peso, Horas de estudio, Pantalla">
+    <div class="lbl">Unidad (opcional)</div><input id="qUnit" class="field" value="${esc(it.unit || "")}" placeholder="kg · h · min">
+    <div class="lbl">Meta (opcional · solo se muestra como referencia)</div><input id="qTarget" class="field" value="${esc(it.target || "")}" placeholder="Ej: 6.5">
+    ${CFG.identities.length ? `<div class="lbl">¿Conectada a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(it.idn)}</div>` : ""}
+    <button class="btn p" onclick="saveMetric('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
+    ${editing ? `<button class="btn g" onclick="delMetric('${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function saveMetric(id) {
+  const name = document.getElementById("qName").value.trim(); if (!name) return;
+  const unit = document.getElementById("qUnit").value.trim();
+  const target = document.getElementById("qTarget").value.trim();
+  if (id) { const it = CFG.metrics.find(x => x.id === id); it.name = name; it.unit = unit; it.target = target; it.idn = _tidn; }
+  else CFG.metrics.push({ id: uid("q"), name, unit, target, idn: _tidn });
+  _tidn = null; saveCfg(); closeModal(); render();
+}
+function delMetric(id) { CFG.metrics = CFG.metrics.filter(x => x.id !== id); saveCfg(); closeModal(); render(); }
 
 /* ---------- Comidas (menú) ---------- */
 function openEditMeal(id) {
@@ -928,6 +1160,50 @@ function saveInneg(id) { const name = document.getElementById("nName").value.tri
 function delInneg(id) { CFG.meals.fichas.innegociables = CFG.meals.fichas.innegociables.filter(n => n.id !== id); saveCfg(); closeModal(); render(); }
 
 /* ---------- Comidas por JSON ---------- */
+/* ---------- Plan: metas, hábitos, compromisos y métricas (JSON) ----------
+   Mismo patrón que la importación de comidas y rutinas. */
+function openImportPlan() {
+  sheet(`<h3>Importar plan (JSON)</h3><div class="mm">Reemplaza tus metas, hábitos, compromisos y métricas. No toca tu historial, tus comidas ni tus rutinas.</div>
+    <textarea id="pjson" placeholder='{"identities":[{"label":"Mi cuerpo","icon":"cuerpo","color":"#FF5A3C"}],"habits":[{"name":"Despertar 5:15","time":"05:15","idn":"Mi cuerpo"}],"commitments":[{"name":"Sin azúcar"}],"metrics":[{"name":"Peso","unit":"kg"}]}' style="min-height:170px;font-family:monospace;font-size:12px"></textarea>
+    <div id="pmsg" style="font-size:13px;margin-top:8px"></div>
+    <button class="btn p" onclick="importPlan()">Importar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function importPlan() {
+  const msg = document.getElementById("pmsg");
+  let d; try { d = JSON.parse(document.getElementById("pjson").value); } catch (e) { msg.innerHTML = `<span style="color:var(--bad)">JSON inválido: ${esc(e.message)}</span>`; return; }
+  const ids = [], byName = {};
+  (d.identities || []).forEach(i => {
+    const id = uid("idn");
+    const it = { id, label: (i.label || i.name || "Meta").toString(), icon: ICONS[i.icon] ? i.icon : "target",
+      raw: (i.color || i.raw || PALETTE[ids.length % PALETTE.length]).toString(),
+      why: (i.why || "").toString(), quotes: Array.isArray(i.quotes) ? i.quotes.map(q => q.toString()) : [] };
+    ids.push(it); byName[it.label.toLowerCase()] = id; byName[(i.id || "").toString().toLowerCase()] = id;
+  });
+  const link = v => { if (!v) return null; return byName[v.toString().toLowerCase()] || null; };
+  const habits = (d.habits || []).map(h => ({ id: uid("habit"), name: (h.name || "Hábito").toString(), time: (h.time || "").toString(), idn: link(h.idn) }));
+  const commitments = (d.commitments || []).map(c => ({ id: uid("commit"), name: (c.name || (typeof c === "string" ? c : "Compromiso")).toString(), idn: link(c.idn) }));
+  const metrics = (d.metrics || []).map(m => ({ id: uid("q"), name: (m.name || "Métrica").toString(), unit: (m.unit || "").toString(), target: (m.target || "").toString(), idn: link(m.idn) }));
+  if (!ids.length && !habits.length && !commitments.length && !metrics.length) { msg.innerHTML = `<span style="color:var(--bad)">No encontré identities, habits, commitments ni metrics.</span>`; return; }
+  freezePastDays();
+  if (ids.length) CFG.identities = ids;
+  if (d.habits) CFG.habits = habits;
+  if (d.commitments) CFG.commitments = commitments;
+  if (d.metrics) CFG.metrics = metrics;
+  saveCfg(); closeModal(); render();
+}
+function exportPlan() {
+  const nameOf = id => { const i = CFG.identities.find(x => x.id === id); return i ? i.label : null; };
+  const clean = {
+    identities: CFG.identities.map(i => ({ label: i.label, icon: i.icon, color: i.raw, why: i.why, quotes: i.quotes })),
+    habits: CFG.habits.map(h => ({ name: h.name, time: h.time || "", idn: nameOf(h.idn) })),
+    commitments: CFG.commitments.map(c => ({ name: c.name, idn: nameOf(c.idn) })),
+    metrics: CFG.metrics.map(m => ({ name: m.name, unit: m.unit, target: m.target, idn: nameOf(m.idn) }))
+  };
+  sheet(`<h3>Exportar plan</h3><div class="mm">Copia este JSON para respaldarlo o editarlo</div>
+    <textarea style="min-height:220px;font-family:monospace;font-size:12px" onclick="this.select()">${esc(JSON.stringify(clean, null, 2))}</textarea>
+    <button class="btn g" onclick="render();closeModal()">Cerrar</button>`);
+}
+
 function openImportMeals() {
   sheet(`<h3>Importar comidas (JSON)</h3><div class="mm">Reemplaza tu configuración de comidas. Revisa la guía (COMIDAS-como-importar-json).</div>
     <textarea id="mjson" placeholder='{"system":"fichas","fichas":{"categories":[{"name":"Proteína","quota":3,"foods":[{"food":"Pollo","amount":"175 g"}]}]}}' style="min-height:170px;font-family:monospace;font-size:12px"></textarea>

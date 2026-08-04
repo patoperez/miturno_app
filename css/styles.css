@@ -85,6 +85,29 @@ body{
 .streak.hot{color:var(--ok); border-color:var(--ok);}
 .streak.hot .icon path{stroke:var(--ok); fill:rgba(34,197,94,.15);}
 .streak.zero{color:var(--muted2);}
+/* Variante chica: racha en hábitos, solo cuando ya vale la pena mirarla. */
+.streak.mini{font-size:12px; padding:2px 7px; gap:3px;}
+.streak.mini .icon{width:12px; height:12px;}
+
+/* Hora del hábito: prefijo discreto en la línea de abajo. */
+.row .sub .hhm{color:var(--muted2); font-variant-numeric:tabular-nums;}
+
+/* ---------- Métricas ---------- */
+.mval{font-size:16px; font-weight:700; color:var(--muted2); font-variant-numeric:tabular-nums; white-space:nowrap;}
+.mval.on{color:var(--text);}
+.mval i{font-style:normal; font-size:11px; font-weight:600; color:var(--muted2); margin-left:2px;}
+.metrow{padding:10px 2px 4px;}
+.metrow + .metrow{border-top:1px solid var(--line);}
+.metrow-h{display:flex; align-items:center; gap:9px; font-size:14px;}
+.metrow-h b{flex:1; min-width:0; font-weight:600;}
+.metrow-h .amt{color:var(--muted); font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums;}
+.metrow-h .amt i{font-style:normal; font-weight:700;}
+.spark{width:100%; height:auto; display:block; margin-top:2px;}
+
+/* ---------- Revisión semanal (bitácora) ---------- */
+.revblock{margin-top:10px; border-left:3px solid var(--lectura); padding-left:12px;}
+.revq{font-size:11px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.4px; margin-top:8px;}
+.reva{font-size:14px; color:var(--muted); margin-top:2px; white-space:pre-wrap;}
 
 .empty{color:var(--muted2); font-size:13px; text-align:center; padding:14px;}
 

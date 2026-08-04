@@ -6,14 +6,25 @@
 ===================================================================== */
 
 const APP_NAME = "Mi Turno";
-const DEFAULT_USER_NAME = "Patricio";
+const DEFAULT_USER_NAME = "tú";
 
-/* Supabase (URL y clave pública — seguras para el navegador, protegidas por RLS) */
+/* =====================================================================
+   ↓↓↓  CONFIGURACIÓN PERSONAL — LO ÚNICO QUE DEBES CAMBIAR  ↓↓↓
+   Si estás montando TU PROPIA copia de la app, reemplaza estos tres
+   valores por los tuyos. Vienen explicados en INSTALAR-TU-COPIA.md
+   Los tres son públicos y seguros para el navegador.
+===================================================================== */
+
+/* 1 y 2: de tu proyecto de Supabase (Project Settings → API) */
 const SUPABASE_URL = "https://xeerkvjlguycmdrimfbn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_lK_T9Z1R7-iHuykHk0NOug_nvzaHYFG";
 
-/* Llave pública de notificaciones (VAPID) — segura para el navegador */
+/* 3: tu llave PÚBLICA de notificaciones (ábrela con generar-llaves.html) */
 const VAPID_PUBLIC = "BPKN-6oj8ac8FQcdqAb8LFzPKSXL4gqebi6k4IBVyFL8IUU326ffNY9BE0w0yhF1mDbpclmqozG0Chz0cHrFDjo";
+
+/* =====================================================================
+   ↑↑↑  FIN DE LA CONFIGURACIÓN PERSONAL  ↑↑↑
+===================================================================== */
 
 /* ---------- Íconos de línea (SVG path, viewBox 0 0 24 24) ---------- */
 const ICONS = {
@@ -74,113 +85,38 @@ const PALETTE = ["#FF5A3C","#F97316","#F59E0B","#FACC15","#22C55E","#10B981",
 const SLEEP_RANGES = ["8h+","7h","6h","5h","4h","3h","3h-"];
 const WEEKDAYS = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"];
 
-/* ---------- SEMILLA inicial (solo la primera vez) ---------- */
+/* =====================================================================
+   SEMILLA inicial — solo se usa la PRIMERA vez que abres la app.
+   Viene vacía a propósito: Mi Turno no supone nada sobre tu vida.
+   Configuras tus metas, hábitos, compromisos y comidas desde Ajustes,
+   o los importas por JSON. Si inicias sesión, se descarga lo tuyo.
+===================================================================== */
 const DEFAULT_CFG = {
   settings: {
     userName: DEFAULT_USER_NAME, mealView: "menu",
     notif: { enabled: false, morning: { on: true, time: "07:30" }, midday: { on: true, time: "15:00" }, night: { on: true, time: "21:30" } }
   },
-  identities: [
-    { id:"cuerpo", label:"El que construye su cuerpo", icon:"cuerpo", raw:"#FF5A3C",
-      why:"Recomposición, luego bulk, luego cut. Un proceso de alrededor de un año para tener el cuerpo que quiero.",
-      quotes:["Aún no somos quien queremos llegar a ser.","Cada comida y cada serie es un voto por el cuerpo que quiero."] },
-    { id:"ingresos", label:"El que genera ingresos", icon:"ingresos", raw:"#10B981",
-      why:"Trabajo remoto e ingresos en línea para ahorrar e irme a vivir a Europa. Construir el CRM y ganar libertad.",
-      quotes:["La libertad se construye un día a la vez.","Europa no es un sueño, es un plan con fecha."] },
-    { id:"ciber", label:"El que se mueve a ciberseguridad", icon:"ciber", raw:"#3B82F6",
-      why:"Mover el rumbo de mi carrera hacia lo que de verdad me apasiona. Empezando por el homelab.",
-      quotes:["Un poco de código hoy es un futuro distinto mañana.","Paso a paso: homelab primero."] },
-    { id:"productividad", label:"El que aprovecha su vida", icon:"productividad", raw:"#8B5CF6",
-      why:"Dejar de desperdiciar mi vida en scroll y encierro. Aprovechar el día y ser dueño de mi tiempo.",
-      quotes:["No más días perdidos.","La disciplina es elegirme a mí sobre mis impulsos."] },
-    { id:"lectura", label:"El que lee y crece", icon:"lectura", raw:"#F59E0B",
-      why:"Alimentar mi mente. Cambiar el scroll infinito por páginas que me construyen.",
-      quotes:["Leer es reprogramarme.","Treinta minutos de libro superan tres horas de scroll."] }
-  ],
-  habits: [
-    { id:"deepwork", name:"Ollin Deep Work",          idn:"ingresos" },
-    { id:"gym",      name:"Ir al gym (training plan)", idn:"cuerpo" },
-    { id:"dieta",    name:"Cumplir la dieta",          idn:"cuerpo" },
-    { id:"coding",   name:"Aprender coding / homelab", idn:"ciber" },
-    { id:"bed23",    name:"Dormir antes de 23:00",     idn:"cuerpo" },
-    { id:"leer",     name:"Leer al menos 20 min",      idn:"lectura" },
-    { id:"meditar",  name:"Meditar",                   idn:"productividad" },
-    { id:"skincare", name:"Higiene y skincare",        idn:"cuerpo" },
-    { id:"plan",     name:"Planear el día (10 min)",   idn:"productividad" }
-  ],
-  commitments: [
-    { id:"noporn",     name:"Sin porno",                   idn:"productividad" },
-    { id:"nosub",      name:"Sin marihuana ni sustancias", idn:"productividad" },
-    { id:"nofastfood", name:"Sin comida chatarra",         idn:"cuerpo" },
-    { id:"nosugar",    name:"Sin azúcar",                  idn:"cuerpo" },
-    { id:"nodoom",     name:"Sin doomscrolling",           idn:"productividad" }
-  ],
-  /* ----- Plantilla de comidas (persistente, aparece igual cada día) ----- */
+  /* Tus metas. Cada hábito y compromiso puede colgar de una. */
+  identities: [],
+  /* Cosas que quieres HACER cada día. */
+  habits: [],
+  /* Cosas que quieres NO hacer. Llevan racha. */
+  commitments: [],
+  /* Números que registras cada día (peso, horas de estudio, pantalla...). */
+  metrics: [],
+  /* Comidas: en modo "menu" marcas comidas; en "fichas", porciones por categoría. */
   meals: {
     menu: [
-      { id:"m1", name:"Desayuno", desc:"Licuado: proteína San Juan + avena + kefir + mantequilla de maní + piña" },
-      { id:"m2", name:"Comida",   desc:"Proteína + carbohidrato + verduras libres" },
-      { id:"m3", name:"Cena",     desc:"Proteína + carbohidrato + verduras" }
+      { id: "m1", name: "Desayuno", desc: "" },
+      { id: "m2", name: "Comida", desc: "" },
+      { id: "m3", name: "Cena", desc: "" }
     ],
-    fichas: {
-      categories: [
-        { id:"prot", name:"Proteína",     color:"#FF5A3C", quota:3 },
-        { id:"carb", name:"Carbohidrato", color:"#F59E0B", quota:5 },
-        { id:"fat",  name:"Grasa",        color:"#8B5CF6", quota:3 }
-      ],
-      innegociables: [
-        { id:"kefir", name:"Kefir Lifeway (1 taza)" },
-        { id:"yogur", name:"Yogurt griego Oikos (170 g)" },
-        { id:"prots", name:"Proteína San Juan (1 scoop)" },
-        { id:"pina",  name:"Piña (200 g)" },
-        { id:"crea",  name:"Creatina (5 g)" }
-      ],
-      catalog: {
-        prot: [
-          {food:"Pechuga de pollo", amount:"175 g", note:"Magra"},
-          {food:"Atún en agua", amount:"205 g"},
-          {food:"Medallón de atún", amount:"170 g"},
-          {food:"Salmón", amount:"195 g", note:"Resta 1 ficha de grasa"},
-          {food:"Res magra", amount:"190 g"},
-          {food:"Lomo de cerdo", amount:"190 g"},
-          {food:"Pescado dorado", amount:"215 g"},
-          {food:"Marlin", amount:"190 g"},
-          {food:"Camarón", amount:"220 g"},
-          {food:"6 claras + 2 huevos", amount:"200 g de clara"}
-        ],
-        carb: [
-          {food:"Arroz blanco cocido", amount:"135 g"},
-          {food:"Arroz integral cocido", amount:"150 g"},
-          {food:"Avena cruda", amount:"65 g"},
-          {food:"Papa cocida", amount:"190 g"},
-          {food:"Camote cocido", amount:"185 g"},
-          {food:"Pasta cocida", amount:"125 g"},
-          {food:"Tortilla de maíz", amount:"3 piezas"},
-          {food:"Pan integral", amount:"3 rebanadas"}
-        ],
-        fat: [
-          {food:"Aceite de oliva", amount:"1 cda (14 g)"},
-          {food:"Aguacate", amount:"90 g"},
-          {food:"Almendras", amount:"28 g"},
-          {food:"Nueces", amount:"22 g"},
-          {food:"Mantequilla de maní", amount:"28 g"}
-        ]
-      }
-    }
+    fichas: { categories: [], innegociables: [], catalog: {} }
   },
-  /* ----- Actividades (personalizable): fuerza y clases ----- */
+  /* Actividades: "strength" usa el reproductor de rutinas; "class" se registra por sesión. */
   activities: [
-    { id:"gym",  name:"Gym",        type:"strength", icon:"dumbbell", color:"#FF5A3C" },
-    { id:"kick", name:"Kickboxing", type:"class",    icon:"boxing",   color:"#3B82F6" },
-    { id:"box",  name:"Boxeo",      type:"class",    icon:"boxing",   color:"#EC4899" }
+    { id: "gym", name: "Gym", type: "strength", icon: "dumbbell", color: "#FF5A3C" }
   ],
-  /* ----- Rutinas de gym (ejemplo editable) ----- */
-  routines: [
-    { id:"push", name:"Push (ejemplo)", days:["lunes","jueves"], exercises:[
-      { id:"e1", name:"Press banca", sets:4, reps:"8-10", rest:120, weight:"", note:"" },
-      { id:"e2", name:"Press militar con mancuerna", sets:3, reps:"10-12", rest:90, weight:"", note:"" },
-      { id:"e3", name:"Fondos en paralelas", sets:3, reps:"10", rest:90, weight:"", note:"" },
-      { id:"e4", name:"Extensión de tríceps en polea", sets:3, reps:"12-15", rest:60, weight:"", note:"" }
-    ]}
-  ]
+  /* Rutinas de gym. Se crean desde Workouts o se importan por JSON. */
+  routines: []
 };

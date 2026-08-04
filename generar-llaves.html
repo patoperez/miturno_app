@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generar llaves de notificaciones · Mi Turno</title>
+<style>
+  :root{--bg:#0E0F13;--card:#16181F;--card2:#1D2029;--line:#262A35;--text:#E7E9EE;--muted:#8A8F9C;--ok:#22C55E;--acc:#FF5A3C;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;padding:28px 18px 60px;max-width:640px;margin:0 auto;}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px;}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:26px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;}
+  .lbl{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;}
+  .val{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:12px;word-break:break-all;user-select:all;cursor:text;min-height:44px;}
+  button{background:var(--acc);color:#fff;border:none;border-radius:12px;padding:15px 22px;font-size:16px;font-weight:700;cursor:pointer;width:100%;}
+  button.copy{background:var(--card2);color:var(--text);border:1px solid var(--line);font-size:13px;padding:9px;margin-top:8px;width:auto;}
+  .warn{background:rgba(255,90,60,.10);border:1px solid rgba(255,90,60,.35);border-radius:12px;padding:14px;font-size:13px;margin-top:18px;}
+  .ok{color:var(--ok);font-weight:600;}
+  #out{display:none;}
+</style>
+</head>
+<body>
+<h1>Llaves de notificaciones</h1>
+<div class="sub">Genera tu par de llaves (VAPID) para que las notificaciones de tu copia de Mi Turno sean solo tuyas. Todo ocurre en tu navegador: nada se envía a internet.</div>
+
+<button onclick="gen()">Generar mis llaves</button>
+
+<div id="out">
+  <div class="card" style="margin-top:18px">
+    <div class="lbl">Llave pública (VAPID_PUBLIC)</div>
+    <div class="val" id="pub"></div>
+    <button class="copy" onclick="cp('pub',this)">Copiar</button>
+    <div style="font-size:12px;color:var(--muted);margin-top:10px">Va en <b>js/config.js</b> (VAPID_PUBLIC) y también como secreto en Supabase.</div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Llave privada (VAPID_PRIVATE)</div>
+    <div class="val" id="priv"></div>
+    <button class="copy" onclick="cp('priv',this)">Copiar</button>
+    <div style="font-size:12px;color:var(--muted);margin-top:10px">Va <b>solo</b> como secreto en Supabase. Nunca la subas a GitHub ni la compartas.</div>
+  </div>
+
+  <div class="warn">Guarda ambas en un lugar seguro (por ejemplo, tu gestor de contraseñas o una nota privada) antes de cerrar esta página. Si las pierdes, generas unas nuevas y vuelves a activar las notificaciones en la app.</div>
+</div>
+
+<script>
+function b64url(buf){
+  let s = btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+  return s.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+async function gen(){
+  try{
+    const kp = await crypto.subtle.generateKey({name:"ECDSA", namedCurve:"P-256"}, true, ["sign","verify"]);
+    const raw = await crypto.subtle.exportKey("raw", kp.publicKey);      // 65 bytes, punto sin comprimir
+    const jwk = await crypto.subtle.exportKey("jwk", kp.privateKey);     // d = escalar privado
+    document.getElementById("pub").textContent  = b64url(raw);
+    document.getElementById("priv").textContent = jwk.d;                 // ya viene en base64url
+    document.getElementById("out").style.display = "block";
+  }catch(e){
+    alert("No se pudieron generar las llaves en este navegador: " + e.message + "\nAbre esta página en Chrome, Edge o Safari actualizados.");
+  }
+}
+function cp(id, btn){
+  const t = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>{ btn.textContent="Copiado"; btn.classList.add("ok"); setTimeout(()=>{btn.textContent="Copiar";btn.classList.remove("ok");},1600); })
+   .catch(()=>alert("Selecciona el texto y cópialo manualmente."));
+}
+</script>
+</body>
+</html>
