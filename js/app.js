@@ -64,6 +64,10 @@ function saveWorkouts() { store.set("mt_workouts", JSON.stringify(WORKOUTS)); }
 
 let LOG = loadLog(), TASKS = loadTasks(), WORKOUTS = loadWorkouts();
 let VIEW = "hoy";
+/* Vista a la que vuelve el engrane cuando ya estás dentro de Ajustes.
+   Ajustes salió de la barra inferior: no gasta un lugar fijo por algo que
+   se abre una vez por semana. */
+let LASTVIEW = "hoy";
 /* Día que se está viendo en Hoy. Arranca siempre en hoy y NO se persiste:
    abrir la app siempre te para en el día de hoy. Nunca apunta al futuro. */
 let VDAY = today();
@@ -433,7 +437,7 @@ function hasWorkout(d) { return WORKOUTS.some(w => w.date === d); }
 /* ---------- Render ---------- */
 const app = document.getElementById("app");
 function render() {
-  ({ hoy: renderHoy, progreso: renderProgreso, workouts: renderWorkouts, metas: renderMetas, ajustes: renderAjustes }[VIEW] || renderHoy)();
+  ({ hoy: renderHoy, progreso: renderProgreso, workouts: renderWorkouts, negocio: renderNegocio, metas: renderMetas, ajustes: renderAjustes }[VIEW] || renderHoy)();
 }
 function header(title, sub, dayKey) {
   const d = dayKey || today();
@@ -441,10 +445,16 @@ function header(title, sub, dayKey) {
   const past = !!dayKey && dayKey !== today();
   const pct = Math.round(pointsFor(d) / (maxFor(d) || 1) * 100) || 0;
   const c = 2 * Math.PI * 26;
+  /* El engrane vive en el header, no en la barra: está en todas las vistas.
+     Dentro de Ajustes el mismo control se vuelve una X que regresa a donde
+     estabas. Convive con el anillo y con el estado de día pasado de Hoy. */
+  const inAj = VIEW === "ajustes";
+  const gear = `<button class="hd-gear${inAj ? " on" : ""}" onclick="openAjustes()" aria-label="${inAj ? "Cerrar ajustes" : "Ajustes"}">${icon(inAj ? "close" : "sliders")}</button>`;
   return `<div class="hd"><div><div class="greet">${sub || ("Hola, " + esc(CFG.settings.userName))}</div><div class="date${past ? " past" : ""}">${title}</div>${past ? `<button class="chip todaychip" onclick="goToday()">${icon("chevright")}Hoy</button>` : ""}</div>
+    <div class="hd-r">${gear}
     <div class="ring"><svg width="62" height="62"><circle cx="31" cy="31" r="26" stroke="var(--line)" stroke-width="6" fill="none"/>
       <circle cx="31" cy="31" r="26" stroke="var(--ok)" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg>
-      <div class="val">${pct}%</div></div></div>`;
+      <div class="val">${pct}%</div></div></div></div>`;
 }
 function sec(id, title, meta, body, iconName, iconColor) {
   const ic = iconName ? `<span style="color:${iconColor || "var(--muted)"};display:flex">${icon(iconName)}</span>` : "";
@@ -1745,8 +1755,39 @@ function importFromFile(input) {
   r.readAsText(f);
 }
 
+/* ========================= NEGOCIO =========================
+   Sección nueva. Todavía no tiene almacén propio: el modelo de datos
+   (`mt_biz`) llega en la siguiente entrega, junto con pipeline, métricas,
+   ideas y sesiones de foco. Por ahora la pestaña existe y no miente: no
+   inventa datos ni guarda nada. */
+function renderNegocio() {
+  let out = header("Negocio", "Tu trabajo, con la misma disciplina");
+  out += `<div class="hero" style="background:linear-gradient(140deg, #10B98133, var(--card) 70%)">
+    <div class="hero-top"><span class="hero-tag" style="color:var(--ingresos);background:#10B98122">${icon("ingresos")} En construcción</span></div>
+    <div class="hero-title">Aquí va tu negocio</div>
+    <div class="hero-sub">La misma disciplina que le das a tus hábitos y a tus entrenos, aplicada a lo que estás construyendo.</div></div>`;
+  out += sec("n_soon", "Lo que viene", "",
+    `<div class="empty" style="text-align:left;padding:2px 6px 10px">Nada de esto guarda datos todavía.</div>`
+    + [["Pipeline", "Prospectos y su avance", "list"],
+       ["Métricas del negocio", "Los números que sí mueves", "chart"],
+       ["Ideas", "Lo que se te ocurre, antes de que se te olvide", "star"],
+       ["Sesiones de foco", "Trabajo profundo, medido", "timer2"]]
+      .map(([t, d, ic]) => `<div class="row"><span class="idi" style="background:#10B98122;color:var(--ingresos)">${icon(ic)}</span>
+        <div class="body"><div class="name">${esc(t)}</div><div class="sub">${esc(d)}</div></div></div>`).join(""),
+    "ingresos", "var(--ingresos)");
+  app.innerHTML = out;
+}
+
 /* ---------- Navegación ---------- */
-const NAV = [["hoy","Hoy","list"], ["progreso","Progreso","chart"], ["workouts","Workouts","dumbbell"], ["metas","Metas","target"], ["ajustes","Ajustes","sliders"]];
+/* Ajustes NO está aquí: se abre con el engrane del header. La barra es para
+   lo que se toca a diario. */
+const NAV = [["hoy","Hoy","list"], ["progreso","Progreso","chart"], ["workouts","Workouts","dumbbell"], ["negocio","Negocio","ingresos"], ["metas","Metas","target"]];
+/* Abre Ajustes; estando dentro, regresa a la vista anterior. */
+function openAjustes() {
+  if (VIEW === "ajustes") VIEW = (LASTVIEW && LASTVIEW !== "ajustes") ? LASTVIEW : "hoy";
+  else { LASTVIEW = VIEW; VIEW = "ajustes"; }
+  closeModal(); buildNav(); render();
+}
 function buildNav() { document.getElementById("nav").innerHTML = NAV.map(([v, label, ic]) => `<button data-v="${v}" class="${v === VIEW ? "on" : ""}">${icon(ic)}${label}</button>`).join(""); }
 document.getElementById("nav").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; VIEW = b.dataset.v; document.querySelectorAll("#nav button").forEach(x => x.classList.toggle("on", x === b)); render(); });
 

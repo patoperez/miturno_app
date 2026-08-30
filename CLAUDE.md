@@ -134,7 +134,18 @@ Para el catálogo de ejercicios: que la migración lo construya desde rutinas **
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación
-5 pestañas: Hoy · Progreso · Workouts · Metas · Ajustes (barra inferior `#nav` / `.nav`). El cuerpo (`body`) contiene `#app` (contenido con scroll) y `#nav` (barra inferior). Modales (`.ov`) y el reproductor (`.player`) son overlays `position:fixed; inset:0` que cubren toda la pantalla.
+5 pestañas: **Hoy · Progreso · Workouts · Negocio · Metas** (barra inferior `#nav` / `.nav`, definida en `NAV`). El cuerpo (`body`) contiene `#app` (contenido con scroll) y `#nav` (barra inferior). Modales (`.ov`) y el reproductor (`.player`) son overlays `position:fixed; inset:0` que cubren toda la pantalla.
+
+### Ajustes vive en el header, no en la barra
+La barra es para lo que se toca a diario; Ajustes se abre una vez por semana y **no gasta un lugar fijo**.
+- `header()` pinta un botón `.hd-gear` dentro de `.hd-r` (el bloque derecho, junto al anillo). Está en **todas** las vistas.
+- `openAjustes()` abre Ajustes y guarda la vista actual en **`LASTVIEW`**; estando ya dentro, el mismo botón **regresa** a esa vista. Dentro de Ajustes el ícono cambia a una X (`close`) y el botón se marca `.on`; si `LASTVIEW` quedara en `"ajustes"`, cae a Hoy en vez de trabarse.
+- Estando en Ajustes **ninguna pestaña queda marcada**: `ajustes` ya no está en `NAV`.
+- `.hd .date` bajó a **20px**: el engrane le quita ~46px de ancho a la fecha y a 22px "Domingo, 30 de agosto" ya no cabía en una línea a 375px.
+- El engrane convive con el anillo de progreso y con el estado de día pasado de Hoy (`dayKey` → tinte ámbar + chip "Hoy"). **Al tocar `header()` hay que conservar las tres cosas.**
+
+### Negocio
+Pestaña nueva (`renderNegocio`, ícono `ingresos`, color `--ingresos`). **Todavía no tiene almacén propio**: por ahora solo pinta un estado vacío honesto que anuncia lo que viene (pipeline, métricas, ideas y sesiones de foco). No inventa datos, no crea `mt_biz` y no toca `BACKUP_KEYS`. El modelo de datos llega en la siguiente entrega.
 
 ### Hoy puede ver y corregir cualquier día pasado
 - `VDAY` es el día que se está viendo. Arranca en `today()` y **no se persiste**: abrir la app siempre te para en hoy.
