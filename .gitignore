@@ -1,2 +1,13 @@
 .DS_Store
 Thumbs.db
+
+# Secretos y entorno — NUNCA se commitean (el repo es público)
+.env
+.env.*
+
+# Supabase CLI (estado local de la máquina)
+supabase/.temp/
+supabase/.branches/
+
+# Node
+node_modules/

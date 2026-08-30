@@ -1,0 +1,20 @@
+{
+  "name": "day2day_app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mi Turno — PWA de habitos, compromisos, comidas y workouts. Sin build: el sitio es HTML/CSS/JS puro servido desde la raiz. Este package.json existe SOLO para los comandos de Supabase.",
+  "scripts": {
+    "sb": "npx --yes supabase@2",
+    "link": "npx --yes supabase@2 link --project-ref xeerkvjlguycmdrimfbn",
+    "db:new": "npx --yes supabase@2 migration new",
+    "db:push": "npx --yes supabase@2 db push --linked",
+    "db:push:dry": "npx --yes supabase@2 db push --linked --dry-run",
+    "db:pull": "npx --yes supabase@2 db pull",
+    "db:status": "npx --yes supabase@2 migration list --linked",
+    "fn:deploy": "npx --yes supabase@2 functions deploy send-reminders --no-verify-jwt",
+    "fn:list": "npx --yes supabase@2 functions list",
+    "fn:logs": "npx --yes supabase@2 functions logs send-reminders",
+    "secrets:list": "npx --yes supabase@2 secrets list",
+    "check": "node --check js/config.js && node --check js/app.js && node --check js/gym.js && node --check js/reorder.js && node --check js/sync.js && node --check sw.js"
+  }
+}

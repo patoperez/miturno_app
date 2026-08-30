@@ -62,6 +62,9 @@ function saveWorkouts() { store.set("mt_workouts", JSON.stringify(WORKOUTS)); }
 
 let LOG = loadLog(), TASKS = loadTasks(), WORKOUTS = loadWorkouts();
 let VIEW = "hoy";
+/* Día que se está viendo en Hoy. Arranca siempre en hoy y NO se persiste:
+   abrir la app siempre te para en el día de hoy. Nunca apunta al futuro. */
+let VDAY = today();
 let PROG = store.get("mt_prog") || "semana"; // semana | mes | bitacora
 let CALYM = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
 const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_rt: true, w_act: true, p_met: true };
@@ -101,11 +104,28 @@ function mealScore(d) {
   return M.menu.filter(m => l.menuDone && l.menuDone[m.id]).length / M.menu.length * mealWeight();
 }
 function maxPts() { return CFG.habits.length + CFG.commitments.length + mealWeight(); }
+/* Puntaje crudo de un día a partir de sus propias marcas. Una sola
+   definición de la fórmula: la usan pointsFor y recalcDay. */
+function rawPoints(d) {
+  const l = LOG[d]; if (!l) return 0;
+  return Object.values(l.habits || {}).filter(Boolean).length
+    + Object.values(l.commitments || {}).filter(Boolean).length + mealScore(d);
+}
 function pointsFor(d) {
   const l = LOG[d]; if (!l) return 0;
   if (l.frozen) return l.pts || 0; // día pasado: puntaje fijo, inmune a cambios de config
-  return Object.values(l.habits || {}).filter(Boolean).length
-    + Object.values(l.commitments || {}).filter(Boolean).length + mealScore(d);
+  return rawPoints(d);
+}
+/* Editar un día pasado a propósito SÍ debe mover su puntaje. El congelado
+   existe para que un cambio de config no reescriba el historial, no para
+   impedir una corrección. Recalcula pts con la misma fórmula que pointsFor
+   y refresca max. En un día no congelado no hace nada: ahí pointsFor ya
+   calcula en vivo. Quien llama es responsable de saveLog(). */
+function recalcDay(d) {
+  const l = LOG[d];
+  if (!l || !l.frozen) return;
+  l.pts = rawPoints(d);
+  l.max = maxPts();
 }
 function maxFor(d) { const l = LOG[d]; return (l && l.frozen) ? (l.max || maxPts()) : maxPts(); }
 /* Congela el puntaje de todos los días ya pasados usando la config actual.
@@ -121,9 +141,9 @@ function freezePastDays() {
 /* Racha de días consecutivos. kind: "commitments" (default) o "habits".
    Si hoy aún no está marcado, la racha se mide desde ayer: el día en curso
    no rompe nada hasta que termine. */
-function streak(id, kind) {
+function streak(id, kind, asOf) {
   const K = kind || "commitments";
-  let d = today();
+  let d = asOf || today();
   if (!(LOG[d] && LOG[d][K] && LOG[d][K][id])) d = addDays(d, -1);
   let s = 0;
   while (LOG[d] && LOG[d][K] && LOG[d][K][id] === true) { s++; d = addDays(d, -1); }
@@ -173,8 +193,9 @@ const app = document.getElementById("app");
 function render() {
   ({ hoy: renderHoy, progreso: renderProgreso, workouts: renderWorkouts, metas: renderMetas, ajustes: renderAjustes }[VIEW] || renderHoy)();
 }
-function header(title, sub) {
-  const pct = Math.round(pointsFor(today()) / maxPts() * 100) || 0;
+function header(title, sub, dayKey) {
+  const d = dayKey || today();
+  const pct = Math.round(pointsFor(d) / (maxFor(d) || 1) * 100) || 0;
   const c = 2 * Math.PI * 26;
   return `<div class="hd"><div><div class="greet">${sub || ("Hola, " + esc(CFG.settings.userName))}</div><div class="date">${title}</div></div>
     <div class="ring"><svg width="62" height="62"><circle cx="31" cy="31" r="26" stroke="var(--line)" stroke-width="6" fill="none"/>
@@ -198,7 +219,7 @@ function habitRow(h, d) {
     <button class="note-btn ${note ? "has" : ""}" onclick="openNote('${d}','${h.id}')">${icon(note ? "edit" : "plus")}</button></div>`;
 }
 function commitmentRow(c, d) {
-  const l = day(d), done = !!l.commitments[c.id], idn = getIdn(c.idn), s = streak(c.id);
+  const l = day(d), done = !!l.commitments[c.id], idn = getIdn(c.idn), s = streak(c.id, "commitments", d);
   return `<div class="row ${done ? "done" : ""}"><div class="mark" style="${done ? "background:var(--ok);border-color:var(--ok)" : ""}" onclick="toggleCommit('${d}','${c.id}')">${icon("check")}</div>
     <div class="body" onclick="toggleCommit('${d}','${c.id}')"><div class="name">${esc(c.name)}</div><div class="sub"><span style="color:${idn.raw}">${esc(idn.label)}</span></div></div>
     <span class="streak ${s > 0 ? "hot" : "zero"}">${icon("flame")}${s}</span></div>`;
@@ -212,37 +233,63 @@ function taskRow(t) {
 }
 function moodColor(n) { return n <= 3 ? "#EF4444" : n <= 6 ? "#F59E0B" : "#22C55E"; }
 
+/* ---------- Navegación de día ----------
+   Hoy puede mirar (y corregir) cualquier día pasado. El futuro no: no se
+   registra lo que todavía no pasó, así que ‹›  topa en hoy. */
+function viewDay() { const t = today(); if (!VDAY || VDAY > t) VDAY = t; return VDAY; }
+function setVDay(d) { const t = today(); VDAY = (!d || d > t) ? t : d; }
+function goDay(n) { setVDay(addDays(viewDay(), n)); render(); }
+function goToday() { VDAY = today(); render(); }
+/* Desde el calendario / la bitácora: pararse en ese día y saltar a Hoy. */
+function editDay(ds) { setVDay(ds); VIEW = "hoy"; closeModal(); buildNav(); render(); }
+function dayNav(d) {
+  const isT = d === today();
+  const next = isT
+    ? `<button disabled aria-label="Día siguiente">${icon("chevright")}</button>`
+    : `<button onclick="goDay(1)" aria-label="Día siguiente">${icon("chevright")}</button>`;
+  const back = isT ? "" : `<button class="dn-today" onclick="goToday()">Hoy</button>`;
+  return `<div class="mnav daynav ${isT ? "" : "past"}">
+    <button onclick="goDay(-1)" aria-label="Día anterior">${icon("chevleft")}</button>
+    <b>${cap(fmtDate(d))}</b>
+    <div class="dn-r">${back}${next}</div></div>`;
+}
+
 function renderHoy() {
-  const d = today(), l = day(d), B = {};
+  const d = viewDay(), isT = d === today(), l = day(d), B = {};
   const doneH = CFG.habits.filter(x => l.habits[x.id]).length;
-  B.hab = sec("h_hab", "Hábitos de hoy", `${doneH}/${CFG.habits.length}`,
+  B.hab = sec("h_hab", isT ? "Hábitos de hoy" : "Hábitos del día", `${doneH}/${CFG.habits.length}`,
     (CFG.habits.length ? habitsSorted().map(x => habitRow(x, d)).join("") : `<div class="empty">Aún no tienes hábitos</div>`)
     + `<button class="addbtn" onclick="openEditHabit()">${icon("plus")} Agregar hábito</button>`, "check", "var(--ok)");
   B.review = reviewSection(d);
   B.metric = metricsSection(d);
   const doneC = CFG.commitments.filter(x => l.commitments[x.id]).length;
   B.com = sec("h_com", "Compromisos", `${doneC}/${CFG.commitments.length}`,
-    `<div class="empty" style="padding:6px 6px 10px;text-align:left">Marca lo que hoy lograste NO hacer. Cada día limpio suma a tu racha.</div>`
+    `<div class="empty" style="padding:6px 6px 10px;text-align:left">${isT ? "Marca lo que hoy lograste NO hacer. Cada día limpio suma a tu racha." : "Marca lo que ese día lograste NO hacer."}</div>`
     + CFG.commitments.map(x => commitmentRow(x, d)).join("")
     + `<button class="addbtn" onclick="openEditCommit()">${icon("plus")} Agregar compromiso</button>`, "flame", "var(--ok)");
   B.gym = gymCardHoy(d);
   B.meal = mealsSection(d);
   const tt = TASKS.filter(t => t.date === d);
-  B.task = sec("h_task", "Tareas de hoy", `${tt.filter(t => t.done).length}/${tt.length}`,
-    (tt.length ? tt.map(taskRow).join("") : `<div class="empty">Sin tareas para hoy</div>`)
-    + `<button class="addbtn" onclick="openTask()">${icon("plus")} Agregar tarea</button>`, "clock", "var(--muted)");
-  const up = TASKS.filter(t => t.date > d && t.date <= addDays(d, 30) && !t.done).sort((a, b) => a.date.localeCompare(b.date));
-  if (up.length) B.next = sec("h_next", "Próximas", String(up.length),
-    up.slice(0, 8).map(t => `<div class="row"><span class="datechip">${fmtShort(t.date)}</span><div class="body"><div class="name">${esc(t.text)}${t.time ? ` <span style="color:var(--muted2)">· ${esc(t.time)}</span>` : ""}</div></div></div>`).join("")
-    + `<button class="addbtn" onclick="VIEW='progreso';PROG='mes';buildNav();render()">${icon("calendar")} Ver calendario</button>`, "calendar", "var(--muted)");
+  B.task = sec("h_task", isT ? "Tareas de hoy" : "Tareas del día", `${tt.filter(t => t.done).length}/${tt.length}`,
+    (tt.length ? tt.map(taskRow).join("") : `<div class="empty">${isT ? "Sin tareas para hoy" : "Sin tareas ese día"}</div>`)
+    + `<button class="addbtn" onclick="openTask('${d}')">${icon("plus")} Agregar tarea</button>`, "clock", "var(--muted)");
+  /* "Próximas" solo tiene sentido parado en hoy: mirando el pasado, lo que
+     viene después ya no es "próximo", es historia o es hoy. */
+  if (isT) {
+    const up = TASKS.filter(t => t.date > d && t.date <= addDays(d, 30) && !t.done).sort((a, b) => a.date.localeCompare(b.date));
+    if (up.length) B.next = sec("h_next", "Próximas", String(up.length),
+      up.slice(0, 8).map(t => `<div class="row"><span class="datechip">${fmtShort(t.date)}</span><div class="body"><div class="name">${esc(t.text)}${t.time ? ` <span style="color:var(--muted2)">· ${esc(t.time)}</span>` : ""}</div></div></div>`).join("")
+      + `<button class="addbtn" onclick="VIEW='progreso';PROG='mes';buildNav();render()">${icon("calendar")} Ver calendario</button>`, "calendar", "var(--muted)");
+  }
   B.sleep = sec("h_sleep", "Sueño", l.sleep || "—",
     `<div class="chips">${SLEEP_RANGES.map(s => `<div class="chip ${l.sleep === s ? "on" : ""}" style="${l.sleep === s ? "background:var(--ciber);border-color:var(--ciber)" : ""}" onclick="setSleep('${d}','${s}')">${s}</div>`).join("")}</div>`, "moon", "var(--ciber)");
-  B.mood = sec("h_mood", "¿Cómo me sentí hoy?", l.mood ? `${l.mood}/10` : "—",
+  B.mood = sec("h_mood", isT ? "¿Cómo me sentí hoy?" : "¿Cómo me sentí?", l.mood ? `${l.mood}/10` : "—",
     `<div class="mood">${[1,2,3,4,5,6,7,8,9,10].map(n => `<b class="${l.mood === n ? "on" : ""}" style="${l.mood === n ? `background:${moodColor(n)}` : ""}" onclick="setMood('${d}',${n})">${n}</b>`).join("")}</div>`, "productividad", "var(--productividad)");
   B.journal = sec("h_journal", "Bitácora del día", l.journal ? "Escrita" : "",
-    `<textarea placeholder="Escribe cómo te fue hoy... (opcional)" onchange="setJournal('${d}',this.value)">${esc(l.journal)}</textarea>`, "book", "var(--lectura)");
+    `<textarea placeholder="${isT ? "Escribe cómo te fue hoy... (opcional)" : "Escribe cómo te fue ese día... (opcional)"}" onchange="setJournal('${d}',this.value)">${esc(l.journal)}</textarea>`, "book", "var(--lectura)");
   const list = HOY_ORDER.filter(k => B[k]).map(k => `<div class="dsec" data-key="${k}">${B[k]}</div>`).join("");
-  app.innerHTML = header(cap(fmtDate(d))) + `<div class="hoylist" id="hoylist">${list}</div>`;
+  app.innerHTML = header(cap(fmtDate(d)), isT ? null : "Estás editando otro día", d)
+    + dayNav(d) + `<div class="hoylist" id="hoylist">${list}</div>`;
   if (typeof initReorderHoy === "function") initReorderHoy();
 }
 
@@ -255,6 +302,19 @@ function todayRoutine() {
 }
 function safeJSON(s) { try { return JSON.parse(s); } catch (e) { return null; } }
 function gymCardHoy(d) {
+  /* Día pasado: solo lectura. No se "inicia" una rutina de ayer; lo único
+     que tiene sentido es ver lo que sí se registró. */
+  if (d !== today()) {
+    const past = WORKOUTS.filter(w => w.date === d);
+    if (!past.length) return sec("h_gym", "Workouts", "—",
+      `<div class="empty" style="padding:6px 6px 10px;text-align:left">Ese día no registraste entrenamiento.</div>`, "dumbbell", "var(--cuerpo)");
+    const body = past.map(w => {
+      const a = getAct(w.activityId);
+      return `<div class="row"><span class="idi" style="background:${a.color}22;color:${a.color}">${icon(a.icon)}</span>
+        <div class="body" onclick="openWorkoutDetail('${w.id}')"><div class="name">${esc(w.name)}</div><div class="sub">${workoutSummary(w)}</div></div></div>`;
+    }).join("");
+    return sec("h_gym", "Workouts", String(past.length), body, "dumbbell", "var(--cuerpo)");
+  }
   const act = getActiveWorkout();
   if (act) {
     const r = CFG.routines.find(x => x.id === act.rid), n = r ? r.exercises.length : 0;
@@ -316,9 +376,9 @@ function mealsFichas(d) {
   }
   return out + `<button class="addbtn" onclick="VIEW='ajustes';buildNav();render()">${icon("sliders")} Configurar fichas</button>`;
 }
-function toggleMenu(d, id) { const l = day(d); l.menuDone[id] = !l.menuDone[id]; saveLog(); render(); }
-function setFicha(d, cid, n) { const l = day(d); const cur = l.fichas[cid] || 0; l.fichas[cid] = (cur >= n) ? n - 1 : n; saveLog(); render(); }
-function toggleInneg(d, id) { const l = day(d); l.inneg[id] = !l.inneg[id]; saveLog(); render(); }
+function toggleMenu(d, id) { const l = day(d); l.menuDone[id] = !l.menuDone[id]; recalcDay(d); saveLog(); render(); }
+function setFicha(d, cid, n) { const l = day(d); const cur = l.fichas[cid] || 0; l.fichas[cid] = (cur >= n) ? n - 1 : n; recalcDay(d); saveLog(); render(); }
+function toggleInneg(d, id) { const l = day(d); l.inneg[id] = !l.inneg[id]; recalcDay(d); saveLog(); render(); }
 function openCatalog(cid) {
   const c = CFG.meals.fichas.categories.find(x => x.id === cid) || { name: "", color: "#888" };
   const list = (CFG.meals.fichas.catalog[cid] || []);
@@ -387,9 +447,9 @@ function saveMetricVal(d, id) {
   const raw = document.getElementById("mvVal").value.trim();
   const l = day(d);
   if (raw === "" || isNaN(Number(raw))) delete l.metrics[id]; else l.metrics[id] = Number(raw);
-  saveLog(); closeModal(); render();
+  recalcDay(d); saveLog(); closeModal(); render();
 }
-function clearMetricVal(d, id) { const l = day(d); delete l.metrics[id]; saveLog(); closeModal(); render(); }
+function clearMetricVal(d, id) { const l = day(d); delete l.metrics[id]; recalcDay(d); saveLog(); closeModal(); render(); }
 
 /* ========================= REVISIÓN SEMANAL =========================
    Aparece el domingo y sigue disponible el lunes por si se pasó. Los otros
@@ -585,6 +645,7 @@ function openDay(ds) {
   const tt = TASKS.filter(t => t.date === ds);
   const ww = WORKOUTS.filter(w => w.date === ds);
   sheet(`<h3 style="text-transform:capitalize">${fmtDate(ds)}</h3><div class="mm">${Math.round(pointsFor(ds))} puntos${l.sleep ? " · " + l.sleep : ""}</div>
+    ${ds <= today() ? `<button class="btn g" style="display:flex;align-items:center;justify-content:center;gap:8px" onclick="editDay('${ds}')">${icon("edit")} Editar este día</button>` : ""}
     <div class="lbl">Tareas</div>
     ${tt.length ? tt.map(t => `<div class="row ${t.done ? "done" : ""}"><div class="mark" style="${t.done ? "background:var(--text);border-color:var(--text)" : ""}" onclick="toggleTask('${t.id}');refreshDay('${ds}')">${icon("check")}</div><div class="body"><div class="name">${esc(t.text)}</div>${t.time ? `<div class="sub">${esc(t.time)}</div>` : ""}</div><button class="note-btn" onclick="delTask('${t.id}');refreshDay('${ds}')">${icon("trash")}</button></div>`).join("") : `<div class="empty">Sin tareas</div>`}
     <button class="addbtn" onclick="openTask('${ds}')">${icon("plus")} Agregar tarea</button>
@@ -819,11 +880,11 @@ function setUserName(v) { CFG.settings.userName = v.trim() || "tú"; saveCfg(); 
 
 /* ---------- Acciones día ---------- */
 function toggleSec(id) { if (window._justDragged) { window._justDragged = false; return; } COLLAPSE[id] = !COLLAPSE[id]; render(); }
-function toggleHabit(d, id) { const l = day(d); l.habits[id] = !l.habits[id]; saveLog(); render(); }
-function toggleCommit(d, id) { const l = day(d); l.commitments[id] = !l.commitments[id]; saveLog(); render(); }
-function setSleep(d, s) { const l = day(d); l.sleep = l.sleep === s ? null : s; saveLog(); render(); }
-function setMood(d, n) { const l = day(d); l.mood = l.mood === n ? null : n; saveLog(); render(); }
-function setJournal(d, v) { const l = day(d); l.journal = v; saveLog(); }
+function toggleHabit(d, id) { const l = day(d); l.habits[id] = !l.habits[id]; recalcDay(d); saveLog(); render(); }
+function toggleCommit(d, id) { const l = day(d); l.commitments[id] = !l.commitments[id]; recalcDay(d); saveLog(); render(); }
+function setSleep(d, s) { const l = day(d); l.sleep = l.sleep === s ? null : s; recalcDay(d); saveLog(); render(); }
+function setMood(d, n) { const l = day(d); l.mood = l.mood === n ? null : n; recalcDay(d); saveLog(); render(); }
+function setJournal(d, v) { const l = day(d); l.journal = v; recalcDay(d); saveLog(); }
 function toggleTask(id) { const t = TASKS.find(x => x.id === id); if (t) { t.done = !t.done; saveTasks(); render(); } }
 function delTask(id) { TASKS = TASKS.filter(x => x.id !== id); saveTasks(); render(); }
 

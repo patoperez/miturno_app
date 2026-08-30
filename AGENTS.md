@@ -1,4 +1,4 @@
-# CLAUDE.md — Mi Turno
+# AGENTS.md — Mi Turno
 
 Contexto del proyecto para agentes de código.
 
