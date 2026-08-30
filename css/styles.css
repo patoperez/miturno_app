@@ -379,6 +379,12 @@ textarea::placeholder{color:var(--muted2);}
 .bizdue.hoy{color:var(--ingresos); border-color:rgba(16,185,129,.5); background:rgba(16,185,129,.10);}
 .bizdue.bizstale{border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.10);}
 
+/* Un seguimiento vencido es lo más ruidoso de la pantalla. La barra va como
+   borde recto: .row tiene border-radius y un box-shadow interior seguiría la
+   curva y se vería como un paréntesis. */
+.row.leadvenc{border-left:3px solid var(--bad); border-radius:0 12px 12px 0; padding-left:10px;
+  background:rgba(239,68,68,.06);}
+
 /* ---------- Ejercicios: duplicados y record ---------- */
 .duprow{padding:10px 6px; border-top:1px solid var(--line);}
 .duprow:first-child{border-top:none;}

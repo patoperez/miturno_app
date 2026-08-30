@@ -54,7 +54,8 @@ Almacén propio, **aparte de `CFG`**: son datos, no configuración. `loadBiz()` 
 ```
 BIZ
   projects[]  {id, name, color, status, why, nextAction, nextActionDue, updatedAt}
-  leads[]     vacío  (pipeline, siguiente entrega)
+  leads[]     {id, name, contact, stage, value, followUp, notes, projectId, stageAt, updatedAt}
+  done[]      {id, projectId, text, doneAt}
   metrics[]   vacío  (siguiente entrega)
   mvals{}     vacío  (siguiente entrega)
   ideas[]     vacío  (siguiente entrega)
@@ -75,6 +76,24 @@ La idea central es que **cada proyecto tiene UNA próxima acción**, no una list
 - Completar una acción (`completeNextAction`) la vacía y **abre de inmediato** "¿y ahora qué sigue?", para no dejar el proyecto sin siguiente paso. Salir con "Ahora no" es válido: entonces el proyecto queda reclamando.
 - Guardar sin texto de acción **también limpia la fecha**: no quedan fechas huérfanas.
 - Los pausados y terminados van en una sección aparte, abajo.
+
+### `done[]`: lo que sí se cerró
+Completar una acción **no la tira**: `completeNextAction` la empuja a `done` **antes** de limpiar el campo, sin agregar un solo tap. Es el equivalente de negocio a una serie registrada.
+- `projectDone(id)` la devuelve por proyecto, lo más reciente primero. `done` es **append-only**, así que a igualdad de milisegundo desempata el orden de inserción: el historial nunca sale barajado.
+- El detalle del proyecto pinta el bloque **"Hecho"** (`doneHistoryBlock`) con las últimas 8.
+- `doneThisWeek()` cuenta desde el **lunes** de la semana en curso (`weekStartTs()`, apoyado en `weekDates()[0]`), y se muestra como `.statrow` en la pestaña de Proyectos. Es la recompensa que le faltaba al módulo: sin esto solo reclama.
+- Completar un proyecto **sin** acción escrita no ensucia el historial.
+
+### Pipeline (`leads[]`): el mini CRM
+Lo que genera ingreso y lo que más fácil se olvida. Un lead que lleva días en la misma etapa se está enfriando, así que el tiempo **en etapa** (`stageAt`) pesa tanto como la fecha de seguimiento.
+- Etapas (`LEAD_STAGES`): `nuevo → contactado → llamada → propuesta → cerrado | perdido`. Las cuatro primeras son `LEAD_OPEN`, el **pipeline vivo**; `cerrado` y `perdido` salen a una sección aparte abajo.
+- `stageAt` se reinicia **solo** cuando la etapa cambia de verdad — editar otros campos no lo toca, o el reloj de enfriamiento se reiniciaría solo.
+- `leadStale(l)`: **`LEAD_STALE_DAYS` = 10** días en la misma etapa, y solo cuenta en el pipeline vivo.
+- `followState(l)` compara `followUp` con `today()` como texto: `vencido` (rojo, `.row.leadvenc` con barra roja a la izquierda), `hoy` (verde) o `futuro`. Un cerrado o perdido ya no se persigue: devuelve `null`.
+- `leadRank(l)` ordena igual que los proyectos: **0** vencido, **1** hoy, **2** sin fecha, **3** enfriándose, **4** el resto.
+- **Avanzar es un tap** desde la fila (`advanceLead` → `nextStage`), y ahí mismo se ofrece la próxima fecha con atajos de un tap (`pickFollow`: mañana / 3 días / 1 semana / 2 semanas), igual que completar una acción pregunta por la siguiente. Llegar a `cerrado` no pide seguimiento.
+- `value` se guarda como número o cadena vacía, nunca `NaN`. Cada etapa muestra conteo y suma (`sumValue`).
+- La pestaña Negocio tiene un control segmentado **Proyectos / Pipeline** (`NEGTAB`, en memoria: no agrega ninguna clave `mt_*`). La pestaña Pipeline muestra en rojo cuántos seguimientos están vencidos.
 
 ## Datos de entrenamiento (`WORKOUTS`, clave `mt_workouts`)
 Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,exId,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
@@ -159,7 +178,7 @@ Dos detalles del harness: el stub de elemento necesita `getContext()` para los `
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
-Para Negocio: que crear/editar/borrar un proyecto persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar, que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, y que Hoy se pinte con cero proyectos y con varios.
+Para Negocio: que crear/editar/borrar un proyecto o un lead persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar (con `leads` y `done` dentro), que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, que avanzar de etapa mueva `stageAt`, que el conteo semanal no cuente lo del domingo anterior, y que Hoy se pinte con cero proyectos, con cero leads y con varios de ambos.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación
@@ -175,8 +194,9 @@ La barra es para lo que se toca a diario; Ajustes se abre una vez por semana y *
 
 ### Negocio
 Pestaña `renderNegocio` (ícono `ingresos`, color `--ingresos`). Ver "Negocio (`BIZ`, clave `mt_biz`)" para el modelo.
-- En **Hoy** hay una sección `biz` (`bizSection`, clave de orden **`"biz"`** en `DEFAULT_HOY_ORDER`) que es **un empujón, no la lista**: solo los proyectos con `projectRank <= 3` (vencido, para hoy, sin acción o estancado), tope `BIZ_HOY_CAP` = 4. Tocar una fila salta al proyecto (`gotoProject`).
-- Se **esconde** si no hay proyectos activos (mismo criterio que `metricsSection`) y **en un día pasado**, como "Próximas": la próxima acción es de ahora, no hay registro de cuál era la de un martes de hace tres semanas.
+- En **Hoy** hay una sección `biz` (`bizSection`, clave de orden **`"biz"`** en `DEFAULT_HOY_ORDER`) que es **un empujón, no la lista**: mezcla acciones de proyecto (`projectRank <= 3`) con seguimientos de pipeline vencidos o de hoy, ordenados por urgencia y con tope `BIZ_HOY_CAP` = **5** (`bizHoyItems`). Un lead vencido pesa igual que una acción vencida: los dos son deuda de ayer.
+- Las dos cosas se distinguen **con palabras**, no solo con color: un proyecto dice `Proyecto · <nombre>` y la acción como título; un lead dice `Seguir a <nombre>` con `Pipeline · <etapa>`. Tocar salta a `gotoProject` o a `gotoLead` (que además cambia `NEGTAB` a pipeline).
+- Se **esconde** si no hay ni proyectos activos ni leads abiertos (mismo criterio que `metricsSection`) y **en un día pasado**, como "Próximas": lo pendiente es de ahora, no hay registro de cuál era el pendiente de un martes de hace tres semanas.
 - Agregar una clave a `DEFAULT_HOY_ORDER` es seguro: el cargador de `HOY_ORDER` filtra las desconocidas y **agrega al final** las que falten, así que un `mt_hoyOrder` ya guardado sigue valiendo y solo recibe la clave nueva al final.
 
 ### Hoy puede ver y corregir cualquier día pasado

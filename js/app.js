@@ -66,7 +66,7 @@ function saveWorkouts() { store.set("mt_workouts", JSON.stringify(WORKOUTS)); }
    contenedores vacíos (leads, metrics, mvals, ideas, focus, reviews) existen
    desde ya para que la siguiente entrega agregue comportamiento sin migrar
    nada. Viene VACÍO a propósito: el repo es público. */
-const DEFAULT_BIZ = { projects: [], leads: [], metrics: [], mvals: {}, ideas: [], focus: [], reviews: {} };
+const DEFAULT_BIZ = { projects: [], leads: [], done: [], metrics: [], mvals: {}, ideas: [], focus: [], reviews: {} };
 function loadBiz() {
   let b; try { b = JSON.parse(store.get("mt_biz")); } catch (e) { b = null; }
   if (!b || typeof b !== "object" || Array.isArray(b)) b = {};
@@ -74,7 +74,7 @@ function loadBiz() {
      antes de esta versión o un JSON a medias no deben romper la sección. */
   const arr = k => { b[k] = Array.isArray(b[k]) ? b[k] : []; };
   const obj = k => { b[k] = (b[k] && typeof b[k] === "object" && !Array.isArray(b[k])) ? b[k] : {}; };
-  ["projects", "leads", "metrics", "ideas", "focus"].forEach(arr);
+  ["projects", "leads", "done", "metrics", "ideas", "focus"].forEach(arr);
   ["mvals", "reviews"].forEach(obj);
   return b;
 }
@@ -1860,11 +1860,20 @@ function projectCard(p) {
     ${nextActionBlock(p)}</div>`;
 }
 
+let NEGTAB = "proyectos";
+function setNegTab(t) { NEGTAB = t; render(); }
 function renderNegocio() {
+  const venc = openLeadsList().filter(l => followState(l) === "vencido").length;
+  let out = header("Negocio", "Tu trabajo, con la misma disciplina")
+    + `<div class="seg"><button class="${NEGTAB === "proyectos" ? "on" : ""}" onclick="setNegTab('proyectos')">Proyectos</button>
+      <button class="${NEGTAB === "pipeline" ? "on" : ""}" onclick="setNegTab('pipeline')">Pipeline${venc ? ` <span style="color:var(--bad)">${venc}</span>` : ""}</button></div>`;
+  app.innerHTML = out + (NEGTAB === "pipeline" ? pipelineView() : projectsView());
+}
+function projectsView() {
   const act = activeProjects();
   const otros = BIZ.projects.filter(p => p.status !== "activo")
     .sort((a, b) => (a.status === b.status ? (b.updatedAt || 0) - (a.updatedAt || 0) : a.status === "pausado" ? -1 : 1));
-  let out = header("Negocio", "Tu trabajo, con la misma disciplina");
+  let out = "";
 
   if (!BIZ.projects.length) {
     out += `<div class="hero" style="background:linear-gradient(140deg, #10B98133, var(--card) 70%)">
@@ -1872,8 +1881,7 @@ function renderNegocio() {
       <div class="hero-title">Empieza por un proyecto</div>
       <div class="hero-sub">Cada proyecto lleva UNA próxima acción: el paso concreto que sigue. Nada más. Eso es lo que evita quedarte viendo la pantalla sin saber por dónde entrar.</div>
       <button class="hero-cta" style="background:var(--ingresos)" onclick="openBizProject()">${icon("plus")} Nuevo proyecto</button></div>`;
-    app.innerHTML = out;
-    return;
+    return out;
   }
 
   const sinAccion = act.filter(p => !p.nextAction).length;
@@ -1888,6 +1896,11 @@ function renderNegocio() {
     <div class="hero-title">${act.length} ${act.length === 1 ? "proyecto activo" : "proyectos activos"}</div>
     <div class="hero-sub">${avisos.length ? esc(avisos.join(" · ")) : "Todo con su próximo paso definido y al día."}</div></div>`;
 
+  /* La recompensa: lo que sí cerraste. Sin esto el módulo solo reclama. */
+  const dw = doneThisWeek();
+  out += `<div class="statrow"><div class="stat"><b>${dw}</b><span>${dw === 1 ? "acción cerrada esta semana" : "acciones cerradas esta semana"}</span></div>
+    <div class="stat"><b style="color:var(--text)">${BIZ.done.length}</b><span>en total</span></div></div>`;
+
   out += act.map(projectCard).join("");
   out += `<button class="addbtn" onclick="openBizProject()">${icon("plus")} Nuevo proyecto</button>`;
   if (otros.length) {
@@ -1897,7 +1910,196 @@ function renderNegocio() {
         <div class="body"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.status)} · ${agoLabel(p.updatedAt)}</div></div>
         <span class="chev">${icon("chevron")}</span></div>`).join(""), "list", "var(--muted)");
   }
-  app.innerHTML = out;
+  return out;
+}
+
+/* ========================= PIPELINE =========================
+   El mini CRM: lo que de verdad genera ingreso y lo que más fácil se
+   olvida. Un lead que lleva días en la misma etapa se está enfriando, así
+   que el tiempo EN ETAPA (`stageAt`) pesa tanto como la fecha de
+   seguimiento. Avanzar de etapa es un solo tap desde la fila. */
+const LEAD_STAGES = ["nuevo", "contactado", "llamada", "propuesta", "cerrado", "perdido"];
+const LEAD_OPEN = ["nuevo", "contactado", "llamada", "propuesta"];   // el pipeline vivo
+const LEAD_COLOR = { nuevo: "#8A8F9C", contactado: "#3B82F6", llamada: "#8B5CF6", propuesta: "#F59E0B", cerrado: "#22C55E", perdido: "#EF4444" };
+const LEAD_STALE_DAYS = 10;   // 10 días en la misma etapa = se está enfriando
+
+function bizLead(id) { return BIZ.leads.find(l => l.id === id) || null; }
+function isOpenStage(st) { return LEAD_OPEN.indexOf(st) >= 0; }
+function openLeadsList() { return BIZ.leads.filter(l => isOpenStage(l.stage)); }
+function leadStale(l) { const d = daysSince(l.stageAt); return isOpenStage(l.stage) && d !== null && d >= LEAD_STALE_DAYS; }
+/* Estado del seguimiento. Solo aplica al pipeline vivo: un cerrado o un
+   perdido ya no se persigue. */
+function followState(l) {
+  if (!isOpenStage(l.stage) || !l.followUp) return null;
+  const t = today();
+  if (l.followUp < t) return "vencido";
+  if (l.followUp === t) return "hoy";
+  return "futuro";
+}
+/* Mismo criterio que los proyectos: primero lo vencido, luego lo de hoy,
+   luego lo que no tiene fecha, luego lo que se está enfriando. */
+function leadRank(l) {
+  const f = followState(l);
+  if (f === "vencido") return 0;
+  if (f === "hoy") return 1;
+  if (!l.followUp) return 2;
+  if (leadStale(l)) return 3;
+  return 4;
+}
+function nextStage(st) { const i = LEAD_OPEN.indexOf(st); return (i >= 0 && i < LEAD_OPEN.length - 1) ? LEAD_OPEN[i + 1] : "cerrado"; }
+function fmtMoney(v) { const n = Number(v); return (!v || isNaN(n)) ? "" : "$" + Math.round(n).toLocaleString("es-MX"); }
+function stageLeads(st) { return BIZ.leads.filter(l => l.stage === st).sort((a, b) => leadRank(a) - leadRank(b) || (a.stageAt || 0) - (b.stageAt || 0)); }
+function sumValue(list) { return list.reduce((a, l) => a + (Number(l.value) || 0), 0); }
+
+/* ---------- Mover de etapa ----------
+   Un tap en la fila avanza a la siguiente etapa; ahí mismo se ofrece la
+   próxima fecha de seguimiento con atajos de un tap, igual que completar la
+   acción de un proyecto pregunta por la siguiente. */
+function setLeadStage(id, stage, ask) {
+  const l = bizLead(id); if (!l) return;
+  if (l.stage !== stage) { l.stage = stage; l.stageAt = Date.now(); }
+  l.updatedAt = Date.now(); saveBiz();
+  if (ask && isOpenStage(stage)) openFollowUp(id, true);
+  else { closeModal(); render(); }
+}
+function advanceLead(id) { const l = bizLead(id); if (l) setLeadStage(id, nextStage(l.stage), true); }
+function openFollowUp(id, justMoved) {
+  const l = bizLead(id); if (!l) return;
+  const t = today();
+  const atajos = [["Mañana", addDays(t, 1)], ["En 3 días", addDays(t, 3)], ["En 1 semana", addDays(t, 7)], ["En 2 semanas", addDays(t, 14)]];
+  sheet(`<h3>${justMoved ? "Movido a " + cap(l.stage) + ". ¿Cuándo lo sigues?" : "Próximo seguimiento"}</h3>
+    <div class="mm">${esc(l.name)} · ponerle fecha es lo único que evita que se enfríe.</div>
+    <div class="chips" style="padding:0">${atajos.map(([lbl, dt]) => `<div class="chip" onclick="pickFollow('${id}','${dt}')">${lbl}</div>`).join("")}</div>
+    <div class="lbl">O una fecha exacta</div><input id="fuDate" class="field" type="date" value="${esc(l.followUp || "")}">
+    <button class="btn p" onclick="saveFollowUp('${id}')">Guardar</button>
+    <button class="btn g" onclick="closeModal();render()">${justMoved ? "Ahora no" : "Cancelar"}</button>`);
+}
+/* Un solo tap: fija la fecha y guarda. */
+function pickFollow(id, dt) { const l = bizLead(id); if (!l) return; l.followUp = dt; l.updatedAt = Date.now(); saveBiz(); closeModal(); render(); }
+function saveFollowUp(id) {
+  const l = bizLead(id); if (!l) return;
+  l.followUp = document.getElementById("fuDate").value || "";
+  l.updatedAt = Date.now(); saveBiz(); closeModal(); render();
+}
+
+/* ---------- Alta y edición de un lead ---------- */
+let _leadStage = "nuevo", _leadProject = "";
+function pickLeadStage(s) { _leadStage = s; document.querySelectorAll("#lgStage button").forEach(b => b.classList.toggle("on", b.dataset.s === s)); }
+function pickLeadProject(pid) {
+  _leadProject = pid;
+  document.querySelectorAll("#lgProj .chip").forEach(c => {
+    const on = c.dataset.p === pid;
+    c.classList.toggle("on", on);
+    c.style.background = on ? "var(--ingresos)" : ""; c.style.borderColor = on ? "var(--ingresos)" : ""; c.style.color = on ? "#0E0F13" : "";
+  });
+}
+function openLead(id) {
+  const editing = !!id, l = editing ? bizLead(id) : null;
+  if (editing && !l) return render();
+  const v = l || { name: "", contact: "", stage: "nuevo", value: "", followUp: "", notes: "", projectId: "" };
+  _leadStage = v.stage; _leadProject = v.projectId || "";
+  const proyectos = BIZ.projects.filter(p => p.status === "activo");
+  sheet(`<h3>${editing ? "Editar prospecto" : "Nuevo prospecto"}</h3>
+    <div class="mm">${editing ? "En " + esc(v.stage) + " " + agoLabel(v.stageAt) : "Alguien que puede convertirse en ingreso."}</div>
+    <div class="lbl">Nombre o empresa</div><input id="lgName" class="field" value="${esc(v.name)}" placeholder="Estudio Ollin">
+    <div class="lbl">Contacto</div><input id="lgContact" class="field" value="${esc(v.contact)}" placeholder="Persona, correo, teléfono...">
+    <div class="lbl">Etapa</div><div class="seg small" id="lgStage">${LEAD_STAGES.map(s => `<button data-s="${s}" class="${s === v.stage ? "on" : ""}" onclick="pickLeadStage('${s}')">${cap(s)}</button>`).join("")}</div>
+    <div class="row2"><div><div class="lbl">Valor estimado</div><input id="lgValue" class="field" type="number" inputmode="decimal" step="any" value="${esc(v.value === 0 || v.value ? v.value : "")}" placeholder="0"></div>
+      <div><div class="lbl">Seguimiento</div><input id="lgFollow" class="field" type="date" value="${esc(v.followUp || "")}"></div></div>
+    ${proyectos.length ? `<div class="lbl">¿De qué proyecto? (opcional)</div><div class="chips" id="lgProj" style="padding:0">
+      <div class="chip ${!_leadProject ? "on" : ""}" data-p="" onclick="pickLeadProject('')" style="${!_leadProject ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">Ninguno</div>
+      ${proyectos.map(p => `<div class="chip ${_leadProject === p.id ? "on" : ""}" data-p="${p.id}" onclick="pickLeadProject('${p.id}')" style="${_leadProject === p.id ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">${esc(p.name)}</div>`).join("")}</div>` : ""}
+    <div class="lbl">Notas</div><textarea id="lgNotes" placeholder="Qué necesita, qué le dijiste, qué sigue...">${esc(v.notes)}</textarea>
+    <button class="btn p" onclick="saveLead('${editing ? id : ""}')">${editing ? "Guardar" : "Crear prospecto"}</button>
+    ${editing && isOpenStage(v.stage) ? `<button class="btn g" onclick="advanceLead('${id}')">${icon("chevright")} Avanzar a ${cap(nextStage(v.stage))}</button>` : ""}
+    ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelLead('${id}')">Borrar prospecto</button>` : ""}
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function saveLead(id) {
+  const name = document.getElementById("lgName").value.trim();
+  if (!name) return;
+  const raw = document.getElementById("lgValue").value.trim();
+  const data = {
+    name,
+    contact: document.getElementById("lgContact").value.trim(),
+    stage: LEAD_STAGES.indexOf(_leadStage) >= 0 ? _leadStage : "nuevo",
+    value: (raw === "" || isNaN(Number(raw))) ? "" : Number(raw),
+    followUp: document.getElementById("lgFollow").value || "",
+    notes: document.getElementById("lgNotes").value.trim(),
+    projectId: _leadProject || ""
+  };
+  const l = id ? bizLead(id) : null;
+  const now = Date.now();
+  if (l) {
+    if (l.stage !== data.stage) l.stageAt = now;   // cambiar de etapa reinicia el reloj
+    Object.assign(l, data); l.updatedAt = now;
+  } else {
+    BIZ.leads.push(Object.assign({ id: uid("ld") }, data, { stageAt: now, updatedAt: now }));
+  }
+  saveBiz(); closeModal(); render();
+}
+function confirmDelLead(id) {
+  const l = bizLead(id); if (!l) return;
+  sheet(`<h3>¿Borrar "${esc(l.name)}"?</h3><div class="mm">Se borra el prospecto y sus notas. Esto no se puede deshacer.</div>
+    <button class="btn p" style="background:var(--bad)" onclick="delLead('${id}')">Sí, borrar</button>
+    <button class="btn g" onclick="openLead('${id}')">Cancelar</button>`);
+}
+function delLead(id) { BIZ.leads = BIZ.leads.filter(l => l.id !== id); saveBiz(); closeModal(); render(); }
+function gotoLead(id) { VIEW = "negocio"; NEGTAB = "pipeline"; buildNav(); render(); openLead(id); }
+
+/* ---------- Fila de un lead ---------- */
+function leadRow(l) {
+  const f = followState(l), st = leadStale(l);
+  const bits = [];
+  const money = fmtMoney(l.value);
+  if (money) bits.push(`<b style="color:var(--text)">${money}</b>`);
+  if (f === "vencido") bits.push(`<span style="color:var(--bad);font-weight:700">seguimiento vencido · ${fmtShort(l.followUp)}</span>`);
+  else if (f === "hoy") bits.push(`<span style="color:var(--ingresos);font-weight:700">seguir hoy</span>`);
+  else if (l.followUp) bits.push(`seguir el ${fmtShort(l.followUp)}`);
+  else if (isOpenStage(l.stage)) bits.push(`<span style="color:var(--lectura)">sin seguimiento</span>`);
+  bits.push(`<span${st ? ` style="color:var(--lectura)"` : ""}>en ${esc(l.stage)} ${agoLabel(l.stageAt)}</span>`);
+  return `<div class="row${f === "vencido" ? " leadvenc" : ""}" onclick="openLead('${l.id}')">
+    <span class="dotc" style="background:${LEAD_COLOR[l.stage]}"></span>
+    <div class="body"><div class="name">${esc(l.name)}</div><div class="sub">${bits.join(" · ")}</div></div>
+    ${isOpenStage(l.stage) ? `<button class="note-btn" aria-label="Avanzar a ${cap(nextStage(l.stage))}" onclick="event.stopPropagation();advanceLead('${l.id}')">${icon("chevright")}</button>` : ""}</div>`;
+}
+
+/* ---------- La vista del pipeline ---------- */
+function pipelineView() {
+  if (!BIZ.leads.length) {
+    return `<div class="hero" style="background:linear-gradient(140deg, #3B82F633, var(--card) 70%)">
+      <div class="hero-top"><span class="hero-tag" style="color:var(--ciber);background:#3B82F622">${icon("list")} Pipeline</span></div>
+      <div class="hero-title">Todavía no hay prospectos</div>
+      <div class="hero-sub">Aquí vive lo que puede convertirse en ingreso. Cada prospecto tiene una etapa y una fecha para volver a buscarlo: sin fecha, se enfría.</div>
+      <button class="hero-cta" style="background:var(--ciber)" onclick="openLead()">${icon("plus")} Nuevo prospecto</button></div>`;
+  }
+  const abiertos = openLeadsList();
+  const venc = abiertos.filter(l => followState(l) === "vencido").length;
+  const fríos = abiertos.filter(leadStale).length;
+  const sinFecha = abiertos.filter(l => !l.followUp).length;
+  const avisos = [];
+  if (venc) avisos.push(venc === 1 ? "1 seguimiento vencido" : venc + " seguimientos vencidos");
+  if (sinFecha) avisos.push(sinFecha === 1 ? "1 sin fecha" : sinFecha + " sin fecha");
+  if (fríos) avisos.push(fríos === 1 ? "1 enfriándose" : fríos + " enfriándose");
+  let out = `<div class="hero" style="background:linear-gradient(140deg, #3B82F633, var(--card) 70%)">
+    <div class="hero-top"><span class="hero-tag" style="color:var(--ciber);background:#3B82F622">${icon("list")} Pipeline</span></div>
+    <div class="hero-title">${fmtMoney(sumValue(abiertos)) || abiertos.length + " en curso"}</div>
+    <div class="hero-sub">${abiertos.length} ${abiertos.length === 1 ? "prospecto abierto" : "prospectos abiertos"}${avisos.length ? " · " + esc(avisos.join(" · ")) : " · todo con su fecha"}</div></div>`;
+
+  LEAD_OPEN.forEach(st => {
+    const ls = stageLeads(st), tot = sumValue(ls);
+    out += sec("n_st_" + st, cap(st), `${ls.length}${tot ? " · " + fmtMoney(tot) : ""}`,
+      ls.length ? ls.map(leadRow).join("") : `<div class="empty">Nada en esta etapa</div>`, "list", LEAD_COLOR[st]);
+  });
+  out += `<button class="addbtn" onclick="openLead()">${icon("plus")} Nuevo prospecto</button>`;
+
+  const cerrados = BIZ.leads.filter(l => !isOpenStage(l.stage)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  if (cerrados.length) {
+    const ganado = sumValue(cerrados.filter(l => l.stage === "cerrado"));
+    out += sec("n_cerr", "Cerrados y perdidos", `${cerrados.length}${ganado ? " · " + fmtMoney(ganado) : ""}`,
+      cerrados.map(leadRow).join(""), "trophy", "var(--muted)");
+  }
+  return out;
 }
 
 /* ---------- Editar un proyecto ---------- */
@@ -1924,9 +2126,19 @@ function openBizProject(id) {
     <div class="lbl">Mi para qué</div><textarea id="bpWhy" placeholder="¿Por qué existe este proyecto?">${esc(v.why)}</textarea>
     <div class="lbl">Próxima acción</div><input id="bpNa" class="field" value="${esc(v.nextAction)}" placeholder="El siguiente paso concreto">
     <div class="lbl">¿Para cuándo? (opcional)</div><input id="bpDue" class="field" type="date" value="${esc(v.nextActionDue || "")}">
+    ${editing ? doneHistoryBlock(id) : ""}
     <button class="btn p" onclick="saveBizProject('${editing ? id : ""}')">${editing ? "Guardar" : "Crear proyecto"}</button>
     ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelProject('${id}')">Borrar proyecto</button>` : ""}
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+/* El rastro de lo cerrado: un proyecto se lee como una fila de pasos
+   entregados, no solo como uno pendiente. */
+function doneHistoryBlock(id) {
+  const h = projectDone(id);
+  if (!h.length) return `<div class="lbl">Hecho</div><div class="empty" style="text-align:left;padding:4px 2px">Todavía nada. Lo que cierres aparece aquí.</div>`;
+  return `<div class="lbl">Hecho (${h.length})</div>`
+    + h.slice(0, 8).map(x => `<div class="catrow"><span>${esc(x.text)}</span><span class="amt">${fmtShort(toKey(new Date(x.doneAt)))}</span></div>`).join("")
+    + (h.length > 8 ? `<div class="empty" style="padding:6px">y ${h.length - 8} más</div>` : "");
 }
 function saveBizProject(id) {
   const name = document.getElementById("bpName").value.trim();
@@ -1959,9 +2171,25 @@ function delBizProject(id) { BIZ.projects = BIZ.projects.filter(p => p.id !== id
    "¿y ahora qué sigue?": un tap para marcar, escribir, un tap para guardar. */
 function completeNextAction(id) {
   const p = bizProject(id); if (!p) return;
+  /* Antes de limpiar, queda el rastro: avanzar tiene que dejar historial,
+     igual que una serie registrada. Esto NO agrega un solo tap. */
+  if (p.nextAction) BIZ.done.push({ id: uid("dn"), projectId: p.id, text: p.nextAction, doneAt: Date.now() });
   p.nextAction = ""; p.nextActionDue = ""; touchProject(p); saveBiz();
   openNextAction(id, true);
 }
+/* Lo hecho de un proyecto, lo más reciente primero. `done` es append-only,
+   así que a igualdad de milisegundo desempata el orden de inserción: el
+   historial nunca sale barajado. */
+function projectDone(id) {
+  return BIZ.done.map((x, i) => ({ x: x, i: i }))
+    .filter(o => o.x.projectId === id)
+    .sort((a, b) => (b.x.doneAt - a.x.doneAt) || (b.i - a.i))
+    .map(o => o.x);
+}
+/* Acciones cerradas desde el lunes de esta semana. Es la recompensa que le
+   faltaba al módulo: el equivalente de negocio a una racha. */
+function weekStartTs() { return new Date(weekDates()[0] + "T00:00:00").getTime(); }
+function doneThisWeek() { const from = weekStartTs(); return BIZ.done.filter(x => x.doneAt >= from).length; }
 function openNextAction(id, justDone) {
   const p = bizProject(id); if (!p) return;
   sheet(`<h3>${justDone ? "Hecho. ¿Y ahora qué sigue?" : "Próxima acción"}</h3>
@@ -1986,21 +2214,44 @@ function gotoProject(id) { VIEW = "negocio"; buildNav(); render(); openBizProjec
    si no hay proyectos activos (mismo criterio que las métricas) y en un día
    pasado, porque la próxima acción es de ahora: no hay registro de cuál era
    la próxima acción de un martes de hace tres semanas. */
-const BIZ_HOY_CAP = 4;
+const BIZ_HOY_CAP = 5;
+/* Lo que pide atención hoy: acciones de proyecto y seguimientos de
+   pipeline, mezclados por urgencia y CON TOPE. Un lead vencido pesa igual
+   que una acción vencida: los dos son deuda de ayer. */
+function bizHoyItems() {
+  const items = [];
+  activeProjects().forEach(p => { const r = projectRank(p); if (r <= 3) items.push({ kind: "proj", rank: r, p }); });
+  openLeadsList().forEach(l => { const f = followState(l); if (f === "vencido" || f === "hoy") items.push({ kind: "lead", rank: f === "vencido" ? 0 : 1, l }); });
+  return items.sort((a, b) => a.rank - b.rank).slice(0, BIZ_HOY_CAP);
+}
+function hoyProjRow(p) {
+  const nag = !p.nextAction, ds = dueState(p);
+  const extra = ds === "vencida" ? ` · <span style="color:var(--bad)">vencida</span>`
+    : ds === "hoy" ? ` · <span style="color:var(--ingresos)">para hoy</span>`
+    : isStale(p) ? ` · <span style="color:var(--lectura)">${agoLabel(p.updatedAt)}</span>` : "";
+  return `<div class="row" onclick="gotoProject('${p.id}')">
+    <span class="dotc" style="background:${p.color}"></span>
+    <div class="body"><div class="name"${nag ? ` style="color:var(--lectura)"` : ""}>${nag ? "Define la próxima acción" : esc(p.nextAction)}</div>
+      <div class="sub">Proyecto · ${esc(p.name)}${extra}</div></div>
+    <span class="chev">${icon("chevron")}</span></div>`;
+}
+/* Un lead se persigue, un proyecto se hace: el texto lo dice sin ambigüedad. */
+function hoyLeadRow(l) {
+  const f = followState(l);
+  return `<div class="row${f === "vencido" ? " leadvenc" : ""}" onclick="gotoLead('${l.id}')">
+    <span class="dotc" style="background:${LEAD_COLOR[l.stage]}"></span>
+    <div class="body"><div class="name">Seguir a ${esc(l.name)}</div>
+      <div class="sub">Pipeline · ${esc(l.stage)} · <span style="color:${f === "vencido" ? "var(--bad)" : "var(--ingresos)"}">${f === "vencido" ? "seguimiento vencido" : "seguir hoy"}</span></div></div>
+    <span class="chev">${icon("chevron")}</span></div>`;
+}
 function bizSection(d) {
   if (d !== today()) return null;
-  const act = activeProjects();
-  if (!act.length) return null;
-  const pick = act.filter(p => projectRank(p) <= 3).slice(0, BIZ_HOY_CAP);
-  const body = pick.length ? pick.map(p => {
-    const nag = !p.nextAction;
-    return `<div class="row" onclick="gotoProject('${p.id}')">
-      <span class="dotc" style="background:${p.color}"></span>
-      <div class="body"><div class="name"${nag ? ` style="color:var(--lectura)"` : ""}>${nag ? "Define la próxima acción" : esc(p.nextAction)}</div>
-        <div class="sub">${esc(p.name)}${dueState(p) === "vencida" ? ` · <span style="color:var(--bad)">vencida</span>` : dueState(p) === "hoy" ? ` · <span style="color:var(--ingresos)">para hoy</span>` : isStale(p) ? ` · <span style="color:var(--lectura)">${agoLabel(p.updatedAt)}</span>` : ""}</div></div>
-      <span class="chev">${icon("chevron")}</span></div>`;
-  }).join("") : `<div class="empty">Nada urgente en tus proyectos. Sigue con lo tuyo.</div>`;
-  return sec("h_biz", "Negocio", pick.length ? String(pick.length) : "al día",
+  if (!activeProjects().length && !openLeadsList().length) return null;
+  const items = bizHoyItems();
+  const body = items.length
+    ? items.map(it => it.kind === "proj" ? hoyProjRow(it.p) : hoyLeadRow(it.l)).join("")
+    : `<div class="empty">Nada urgente en tu negocio. Sigue con lo tuyo.</div>`;
+  return sec("h_biz", "Negocio", items.length ? String(items.length) : "al día",
     body + `<button class="addbtn" onclick="VIEW='negocio';buildNav();render()">${icon("ingresos")} Ver Negocio</button>`,
     "ingresos", "var(--ingresos)");
 }
