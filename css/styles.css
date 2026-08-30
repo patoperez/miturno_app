@@ -381,6 +381,21 @@ textarea::placeholder{color:var(--muted2);}
 .bizdue.hoy{color:var(--ingresos); border-color:rgba(16,185,129,.5); background:rgba(16,185,129,.10);}
 .bizdue.bizstale{border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.10);}
 
+/* ---------- Bloques de rutina ---------- */
+.blk{border:1px solid var(--line); border-radius:14px; padding:10px; margin-bottom:10px; background:var(--card2);}
+.blk-h{display:flex; align-items:center; gap:8px; padding:2px 4px 8px;}
+.blk-dot{width:9px; height:9px; border-radius:50%; flex:none;}
+.blk-t{flex:1; min-width:0;}
+.blk-t b{display:block; font-size:14px; font-weight:700;}
+.blk-t span{display:block; font-size:11px; color:var(--muted2); text-transform:uppercase; letter-spacing:.4px;}
+.blk-h .note-btn[disabled]{opacity:.3;}
+/* Cabecera del reproductor: en qué parte de la sesión voy. */
+.pl-blk{display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:700;}
+.pl-blkn{font-size:12px; color:var(--muted2); margin-left:6px;}
+/* Cerrar un bloque es un momento distinto a cerrar un ejercicio. */
+.pl-blkdone{border:1px solid; border-radius:18px; padding:18px 16px; display:flex; flex-direction:column; align-items:center; gap:6px;}
+.pl-blkname{font-size:22px; font-weight:800;}
+
 /* Un seguimiento vencido es lo más ruidoso de la pantalla. La barra va como
    borde recto: .row tiene border-radius y un box-shadow interior seguiría la
    curva y se vería como un paréntesis. */

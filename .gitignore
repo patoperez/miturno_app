@@ -11,3 +11,7 @@ supabase/.branches/
 
 # Node
 node_modules/
+
+# Capturas de pantalla para revision: pueden contener datos reales.
+# El repo es PUBLICO, asi que NUNCA se commitean.
+capturas/

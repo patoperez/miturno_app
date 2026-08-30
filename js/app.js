@@ -252,6 +252,118 @@ function setExId(s) {
 }
 function exName(id, fallback) { const e = exById(id); return e ? e.name : (fallback || "Ejercicio"); }
 
+/* ========================= RUTINAS POR BLOQUES =========================
+   Una sesión tiene PARTES, no una lista plana: calentamiento, el trabajo
+   principal, los extras (abdomen, cuello) y el enfriamiento. `kind` manda el
+   comportamiento y el color; `name` es lo que se lee, así que puede haber
+   dos bloques `extra` llamados "Abdomen" y "Cuello" y se leen como secciones
+   distintas, no como sobras. */
+const BLOCK_KINDS = ["calentamiento", "principal", "extra", "enfriamiento"];
+const BLOCK_LABEL = { calentamiento: "Calentamiento", principal: "Principal", extra: "Extra", enfriamiento: "Enfriamiento" };
+const BLOCK_COLOR = { calentamiento: "#F59E0B", principal: "#FF5A3C", extra: "#8B5CF6", enfriamiento: "#3B82F6" };
+function blockKind(k) { return BLOCK_KINDS.indexOf(k) >= 0 ? k : "principal"; }
+/* Siempre devuelve bloques, aunque la rutina todavía no se haya migrado. */
+function routineBlocks(r) {
+  if (!r) return [];
+  if (Array.isArray(r.blocks) && r.blocks.length) return r.blocks;
+  if (Array.isArray(r.exercises) && r.exercises.length) {
+    return [{ id: "b_legacy", name: "Principal", kind: "principal", exercises: r.exercises }];
+  }
+  return [];
+}
+/* Todos los ejercicios de la rutina, aplanados y en orden. */
+function routineExercises(r) {
+  const out = [];
+  routineBlocks(r).forEach(b => (b.exercises || []).forEach(e => out.push(e)));
+  return out;
+}
+function blockOfIndex(r, i) {
+  let n = 0;
+  const bs = routineBlocks(r);
+  for (let bi = 0; bi < bs.length; bi++) {
+    const len = (bs[bi].exercises || []).length;
+    if (i < n + len) return { block: bs[bi], bi: bi, idx: i - n, of: len };
+    n += len;
+  }
+  return null;
+}
+/* Migración ADITIVA e idempotente: una rutina plana pasa a tener un solo
+   bloque `principal` con LOS MISMOS objetos de ejercicio, así que ni un
+   `exId` ni una nota se pierden. Correrla dos veces no cambia nada. */
+function migrateRoutineBlocks() {
+  let dirty = false;
+  (CFG.routines || []).forEach(r => {
+    if (Array.isArray(r.blocks) && r.blocks.length) { if ("exercises" in r) { delete r.exercises; dirty = true; } return; }
+    const flat = Array.isArray(r.exercises) ? r.exercises : [];
+    r.blocks = [{ id: uid("bk"), name: "Principal", kind: "principal", exercises: flat }];
+    delete r.exercises;      // los ejercicios viven ahora dentro del bloque
+    dirty = true;
+  });
+  if (dirty) saveCfg();
+  return dirty;
+}
+
+/* ---------- Tipo de ejercicio ----------
+   No todo se mide en series×reps×peso: una plancha va en segundos y una
+   dominada no lleva peso que anotar. `type` y `bodyweight` viven en la
+   DEFINICIÓN del ejercicio dentro de la rutina, NO en el catálogo: el
+   catálogo identifica al ejercicio y no debe fragmentarse por esto. */
+function exType(e) { return (e && e.type === "tiempo") ? "tiempo" : "reps"; }
+function exIsTime(e) { return exType(e) === "tiempo"; }
+function exIsBw(e) { return !!(e && e.bodyweight); }
+function exSeconds(e) { const n = parseInt(e && e.seconds, 10); return isNaN(n) || n <= 0 ? 30 : n; }
+/* Cómo se lee el objetivo de un ejercicio en una sola línea. */
+function exTargetText(e) {
+  if (exIsTime(e)) return `${e.sets}×${fmtSecs(exSeconds(e))}`;
+  return `${e.sets}×${esc(e.reps)}${exIsBw(e) ? " · peso corporal" : (e.weight ? " · " + esc(e.weight) : "")}`;
+}
+function fmtSecs(s) {
+  const n = Math.max(0, Math.round(s || 0));
+  if (n < 60) return n + "s";
+  const m = Math.floor(n / 60), r = n % 60;
+  return m + "m" + (r ? " " + r + "s" : "");
+}
+
+/* ---------- Records por tipo de medida ----------
+   Un ejercicio de tiempo tiene su record en el aguante más largo; uno de
+   peso corporal, en las reps más altas. NUNCA se reporta un record de peso
+   para algo que no lleva peso. */
+function exSetsOf(id) {
+  const out = [];
+  WORKOUTS.forEach(w => (w.sets || []).forEach(s => { if (setExId(s) === id) out.push({ s: s, w: w }); }));
+  return out;
+}
+function exBestTime(id) {
+  let best = null;
+  exSetsOf(id).forEach(o => {
+    const v = parseInt(o.s.secs, 10);
+    if (isNaN(v) || v <= 0) return;
+    if (!best || v > best.secs) best = { secs: v, reps: o.s.reps, date: o.w.date };
+  });
+  return best;
+}
+function exBestReps(id) {
+  let best = null;
+  exSetsOf(id).forEach(o => {
+    if (o.s.weight && !isNaN(parseFloat(o.s.weight))) return;   // eso es record de peso, no de reps
+    const v = parseInt(o.s.reps, 10);
+    if (isNaN(v) || v <= 0) return;
+    if (!best || v > best.reps) best = { reps: v, date: o.w.date };
+  });
+  return best;
+}
+/* El record que corresponde a ESE ejercicio, según lo que realmente se
+   registró: {kind, label, date}. Devuelve null si no hay nada que presumir. */
+function exPRInfo(id) {
+  const t = exBestTime(id);
+  if (t) return { kind: "tiempo", label: fmtSecs(t.secs), value: t.secs, date: t.date };
+  const w = exercisePR(id);
+  if (w) return { kind: "peso", label: w.weight + " " + ((CFG.settings && CFG.settings.unit) || "kg") + (w.reps ? " × " + w.reps : ""), value: w.weight, date: w.date };
+  const r = exBestReps(id);
+  if (r) return { kind: "reps", label: r.reps + " reps", value: r.reps, date: r.date };
+  return null;
+}
+
 /* ---------- Migración (idempotente, solo agrega) ----------
    Construye el catálogo a partir de las rutinas Y de todo el historial, y
    rellena `exId`. NUNCA borra `exName`, ni reescribe una serie, ni tira un
@@ -260,7 +372,7 @@ function migrateExercises() {
   CFG.exercises = CFG.exercises || [];
   CFG.exDismissed = CFG.exDismissed || [];
   let cfgDirty = false, wDirty = false;
-  (CFG.routines || []).forEach(r => (r.exercises || []).forEach(e => {
+  (CFG.routines || []).forEach(r => routineExercises(r).forEach(e => {
     if (e.exId && exById(e.exId)) return;
     e.exId = findOrCreateExercise(e.name).id;
     cfgDirty = true;
@@ -280,8 +392,9 @@ function lastPerf(idOrName) {
   const id = toExId(idOrName); if (!id) return null;
   for (let i = WORKOUTS.length - 1; i >= 0; i--) {
     const w = WORKOUTS[i]; if (!w.sets) continue;
-    const hit = w.sets.filter(s => setExId(s) === id && (s.weight || s.reps));
-    if (hit.length) { const s = hit[hit.length - 1]; return { weight: s.weight, reps: s.reps, date: w.date }; }
+    /* Una serie por tiempo no trae peso ni reps: se reconoce por `secs`. */
+    const hit = w.sets.filter(s => setExId(s) === id && (s.weight || s.reps || s.secs));
+    if (hit.length) { const s = hit[hit.length - 1]; return { weight: s.weight, reps: s.reps, secs: s.secs || null, date: w.date }; }
   }
   return null;
 }
@@ -421,7 +534,7 @@ function mergeExercises(keepId, dropId) {
   addAlias(keep, drop.name);
   (drop.aliases || []).forEach(a => addAlias(keep, a));
   WORKOUTS.forEach(w => (w.sets || []).forEach(s => { if (s.exId === drop.id) s.exId = keep.id; }));
-  (CFG.routines || []).forEach(r => (r.exercises || []).forEach(e => { if (e.exId === drop.id) e.exId = keep.id; }));
+  (CFG.routines || []).forEach(r => routineExercises(r).forEach(e => { if (e.exId === drop.id) e.exId = keep.id; }));
   CFG.exercises = CFG.exercises.filter(x => x.id !== drop.id);
   CFG.exDismissed = (CFG.exDismissed || []).filter(k => k.indexOf(drop.id) < 0);
   saveCfg(); saveWorkouts();
@@ -613,7 +726,7 @@ function gymCardHoy(d) {
   }
   const act = getActiveWorkout();
   if (act) {
-    const r = CFG.routines.find(x => x.id === act.rid), n = r ? r.exercises.length : 0;
+    const r = CFG.routines.find(x => x.id === act.rid), n = r ? routineExercises(r).length : 0;
     const body = `<div class="gymrow"><div><div class="name">En curso · ${esc(r ? r.name : "Entreno")}</div><div class="sub">Ejercicio ${act.ei + 1}/${n} · serie ${act.si}</div></div>
       <button class="startbtn" onclick="resumeWorkout()">${icon("play")} Reanudar</button></div>
       <div class="gymlinks"><button onclick="openActiveOptions()">Opciones del entreno</button></div>`;
@@ -628,7 +741,7 @@ function gymCardHoy(d) {
     return sec("h_gym", "Workouts", `${doneT.length} hoy`, body, "dumbbell", "var(--cuerpo)");
   }
   if (r) {
-    const body = `<div class="gymrow"><div><div class="name">${esc(r.name)}</div><div class="sub">${r.exercises.length} ejercicios · fuerza</div></div>
+    const body = `<div class="gymrow"><div><div class="name">${esc(r.name)}</div><div class="sub">${routineExercises(r).length} ejercicios · fuerza</div></div>
       <button class="startbtn" onclick="startWorkout('${r.id}')">${icon("play")} Iniciar</button></div>`;
     return sec("h_gym", "Workouts", "Hoy toca", body, "dumbbell", "var(--cuerpo)");
   }
@@ -994,10 +1107,10 @@ function renderWorkouts() {
   out += `<div class="hero"><div class="hero-top"><span class="hero-tag">${icon("dumbbell")} ${act ? "En curso" : "Hoy"}</span></div>`;
   if (act) {
     const ar = CFG.routines.find(x => x.id === act.rid);
-    out += `<div class="hero-title">${esc(ar ? ar.name : "Entreno")}</div><div class="hero-sub">Ejercicio ${act.ei + 1}/${ar ? ar.exercises.length : "?"} · serie ${act.si} · sin terminar</div>
+    out += `<div class="hero-title">${esc(ar ? ar.name : "Entreno")}</div><div class="hero-sub">Ejercicio ${act.ei + 1}/${ar ? routineExercises(ar).length : "?"} · serie ${act.si} · sin terminar</div>
       <button class="hero-cta" onclick="resumeWorkout()">${icon("play")} Reanudar</button>
       <button class="hero-link" onclick="openActiveOptions()">Opciones del entreno</button>`;
-  } else if (r) out += `<div class="hero-title">${esc(r.name)}</div><div class="hero-sub">${r.exercises.length} ejercicios · fuerza</div>
+  } else if (r) out += `<div class="hero-title">${esc(r.name)}</div><div class="hero-sub">${routineExercises(r).length} ejercicios · fuerza</div>
       <button class="hero-cta" onclick="startWorkout('${r.id}')">${icon("play")} Iniciar rutina</button>
       <button class="hero-link" onclick="openPickRoutine()">Cambiar rutina</button>`;
   else out += `<div class="hero-title">Sin rutina de fuerza hoy</div><div class="hero-sub">Elige una o registra otra actividad</div>
@@ -1030,23 +1143,23 @@ function renderWorkouts() {
   const U2 = (CFG.settings && CFG.settings.unit) || "kg";
   const exs = allLoggedExercises();
   out += sec("w_rec", "Records", String(exs.length), exs.length ? exs.map(e => {
-    const pr = exercisePR(e.id);
+    const pr = exPRInfo(e.id);
     return `<div class="row" onclick="openExerciseDetail('${e.id}')"><span class="idi" style="background:#F59E0B22;color:#F59E0B">${icon("trophy")}</span>
-      <div class="body"><div class="name">${esc(e.name)}</div><div class="sub">${pr ? pr.weight + " " + U2 + " × " + esc(pr.reps) : "—"}</div></div><span class="chev">${icon("chevron")}</span></div>`;
-  }).join("") : `<div class="empty">Tus records aparecerán al registrar pesos.</div>`, "trophy", "var(--lectura)");
+      <div class="body"><div class="name">${esc(e.name)}</div><div class="sub">${pr ? esc(pr.label) : "—"}</div></div><span class="chev">${icon("chevron")}</span></div>`;
+  }).join("") : `<div class="empty">Tus records aparecerán al registrar series.</div>`, "trophy", "var(--lectura)");
   // Catálogo completo de ejercicios
   const cat = (CFG.exercises || []).slice().sort((a, b) => a.name.localeCompare(b.name, "es"));
   out += sec("w_ex", "Ejercicios", String(cat.length), cat.length ? cat.map(e => {
-    const pr = exercisePR(e.id), ns = exSessions(e.id).length;
+    const pr = exPRInfo(e.id), ns = exSessions(e.id).length;
     const bits = [ns ? ns + (ns === 1 ? " sesión" : " sesiones") : "sin registros"];
-    if (pr) bits.push("PR " + pr.weight + " " + U2);
+    if (pr) bits.push("PR " + pr.label);
     if ((e.aliases || []).length) bits.push((e.aliases.length === 1 ? "1 alias" : e.aliases.length + " alias"));
     return `<div class="row" onclick="openExerciseDetail('${e.id}')"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
       <div class="body"><div class="name">${esc(e.name)}</div><div class="sub">${bits.join(" · ")}</div></div><span class="chev">${icon("chevron")}</span></div>`;
   }).join("") : `<div class="empty">Tu catálogo se llena solo al registrar o importar rutinas.</div>`, "list", "var(--cuerpo)");
   // Rutinas
   const list = CFG.routines.length ? CFG.routines.map(r2 => `<div class="row"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
-    <div class="body" onclick="openRoutineEditor('${r2.id}')"><div class="name">${esc(r2.name)}</div><div class="sub">${r2.exercises.length} ejercicios${r2.days && r2.days.length ? " · " + r2.days.join(", ") : ""}</div></div>
+    <div class="body" onclick="openRoutineEditor('${r2.id}')"><div class="name">${esc(r2.name)}</div><div class="sub">${routineExercises(r2).length} ejercicios · ${routineBlocks(r2).length} bloques${r2.days && r2.days.length ? " · " + r2.days.join(", ") : ""}</div></div>
     <button class="startbtn" onclick="startWorkout('${r2.id}')">${icon("play")}</button></div>`).join("") : `<div class="empty">Ninguna rutina aún</div>`;
   out += sec("w_rt", "Rutinas de fuerza", String(CFG.routines.length), list
     + `<button class="addbtn" onclick="openRoutineEditor()">${icon("plus")} Nueva rutina</button><button class="addbtn" onclick="openImportJSON()">${icon("upload")} Importar JSON</button>`, "dumbbell", "var(--cuerpo)");
@@ -1205,8 +1318,18 @@ function delWorkout(id) { WORKOUTS = WORKOUTS.filter(w => w.id !== id); saveWork
 
 /* ---------- Registrar sesión de clase ---------- */
 let _sInt = null;
-/* Nunca al futuro: no se registra lo que no ha pasado. */
+/* Nunca al futuro: no se registra lo que no ha pasado. Se RECHAZA en vez de
+   recortar en silencio — escribir un entreno en el día equivocado es peor
+   que un error visible. `clampPast` solo se usa para el valor inicial de un
+   formulario; `validPast` es la que decide si se guarda. */
 function clampPast(d) { const t = today(); return (!d || d > t) ? t : d; }
+function isFutureDate(d) { return !!d && d > today(); }
+/* Devuelve la fecha si es válida, o null si es futura/vacía. */
+function validPast(d) { return (!d || isFutureDate(d)) ? null : d; }
+function futureDateMsg(elId) {
+  const el = document.getElementById(elId);
+  if (el) el.innerHTML = `<span style="color:var(--bad)">Esa fecha aún no llega. Solo puedes registrar días que ya pasaron.</span>`;
+}
 /* Marca el hábito de gym del día que sea. Un entreno registrado a
    posteriori tiene que contar igual que uno en vivo, y un día pasado está
    congelado: por eso hay que recalcularlo. */
@@ -1225,6 +1348,7 @@ function openLogSession(actId, dateStr) {
       <div><div class="lbl">Día</div><input id="sDate" class="field" type="date" max="${today()}" value="${dd}"></div></div>
     <div class="lbl">Intensidad</div><div class="scale">${[1,2,3,4,5,6,7,8,9,10].map(i => `<b onclick="pickIntensity(this,${i})">${i}</b>`).join("")}</div>
     <div class="lbl">Notas (opcional)</div><textarea id="sNote" placeholder="Cómo estuvo, técnicas, sparring..."></textarea>
+    <div id="sMsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="saveSession('${actId}','${dd}')">Guardar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function pickIntensity(el, i) { _sInt = i; document.querySelectorAll(".scale b").forEach(b => b.classList.remove("on")); el.classList.add("on"); }
@@ -1232,7 +1356,8 @@ function saveSession(actId, dd) {
   const a = getAct(actId);
   const dur = parseInt(document.getElementById("sDur").value) || 0;
   const el = document.getElementById("sDate");
-  const d = clampPast((el && el.value) || dd);
+  const d = validPast((el && el.value) || dd);
+  if (!d) { futureDateMsg("sMsg"); return; }
   WORKOUTS.push({ id: uid("w"), date: d, activityId: actId, type: "class", name: a.name, duration: dur, intensity: _sInt, notes: document.getElementById("sNote").value.trim() });
   _sInt = null; saveWorkouts(); markGymHabit(d); closeModal(); render();
 }
@@ -1247,7 +1372,11 @@ function openManualWorkout(dateStr) {
   _MW = { date: clampPast(dateStr), routineId: "", name: "", dur: "", sets: [] };
   renderManualWorkout();
 }
-function mwSetDate(v) { _MW.date = clampPast(v); renderManualWorkout(); }
+function mwSetDate(v) {
+  _MW.err = isFutureDate(v) ? `<span style="color:var(--bad)">Esa fecha aún no llega. Solo puedes registrar días que ya pasaron.</span>` : "";
+  _MW.date = v || _MW.date;
+  renderManualWorkout();
+}
 function mwPickRoutine(rid) {
   _MW.routineId = rid;
   const r = CFG.routines.find(x => x.id === rid);
@@ -1255,13 +1384,33 @@ function mwPickRoutine(rid) {
   renderManualWorkout();
 }
 function mwDelSet(i) { _MW.sets.splice(i, 1); renderManualWorkout(); }
+/* Corregir una serie ya agregada: era exactamente el hueco que se había
+   arreglado para las sesiones de foco y se había vuelto a dejar aquí. */
+function openMwEdit(i) {
+  const s = _MW.sets[i]; if (!s) return;
+  sheet(`<h3>Editar serie</h3><div class="mm">${esc(s.exName)}</div>
+    <div class="row2"><div><div class="lbl">Peso (${weightUnit()})</div><input id="meW" class="field" inputmode="decimal" value="${esc(s.weight)}"></div>
+      <div><div class="lbl">Reps</div><input id="meR" class="field" inputmode="numeric" value="${esc(s.reps)}"></div></div>
+    <div class="lbl">Segundos (si es por tiempo)</div><input id="meS" class="field" inputmode="numeric" value="${esc(s.secs || "")}" placeholder="—">
+    <button class="btn p" onclick="saveMwEdit(${i})">Guardar</button>
+    <button class="btn g" style="color:var(--bad)" onclick="mwDelSet(${i})">Borrar serie</button>
+    <button class="btn g" onclick="renderManualWorkout()">Cancelar</button>`);
+}
+function saveMwEdit(i) {
+  const s = _MW.sets[i]; if (!s) return;
+  s.weight = (document.getElementById("meW").value || "").trim();
+  s.reps = (document.getElementById("meR").value || "").trim();
+  const sec = parseInt(document.getElementById("meS").value, 10);
+  if (isNaN(sec) || sec <= 0) delete s.secs; else s.secs = sec;
+  renderManualWorkout();
+}
 function renderManualWorkout() {
   const r = CFG.routines.find(x => x.id === _MW.routineId);
   const U = weightUnit();
   const filas = _MW.sets.length
-    ? _MW.sets.map((s, i) => `<div class="catrow"><span>${esc(s.exName)}</span>
-        <span class="amt">${s.weight ? esc(s.weight) + " " + U : "—"} × ${esc(s.reps) || "—"}
-        <button class="note-btn" style="display:inline-flex;margin-left:8px" onclick="mwDelSet(${i})">${icon("trash")}</button></span></div>`).join("")
+    ? _MW.sets.map((s, i) => `<div class="catrow" style="cursor:pointer" onclick="openMwEdit(${i})"><span>${esc(s.exName)}</span>
+        <span class="amt">${s.secs ? fmtSecs(s.secs) : (s.weight ? esc(s.weight) + " " + U : "—") + " × " + (esc(s.reps) || "—")}
+        <button class="note-btn" style="display:inline-flex;margin-left:8px" onclick="event.stopPropagation();mwDelSet(${i})">${icon("trash")}</button></span></div>`).join("")
     : `<div class="empty">Sin series todavía</div>`;
   sheet(`<h3>Registrar entreno</h3><div class="mm">Para el entreno que hiciste pero no registraste.</div>
     <div class="row2"><div><div class="lbl">Día</div><input class="field" type="date" max="${today()}" value="${_MW.date}" onchange="mwSetDate(this.value)"></div>
@@ -1271,13 +1420,14 @@ function renderManualWorkout() {
       ${CFG.routines.map(x => `<div class="chip ${_MW.routineId === x.id ? "on" : ""}" style="${_MW.routineId === x.id ? "background:var(--cuerpo);border-color:var(--cuerpo);color:#fff" : ""}" onclick="mwPickRoutine('${x.id}')">${esc(x.name)}</div>`).join("")}</div>
     <div class="lbl">Series (${_MW.sets.length})</div>${filas}
     <button class="addbtn" onclick="openMwSet()">${icon("plus")} Agregar series</button>
+    <div id="mwMsg" style="font-size:13px;margin-top:8px">${_MW.err || ""}</div>
     <button class="btn p" onclick="saveManualWorkout()">Guardar entreno</button>
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 /* Agregar varias series iguales de un jalón: 4×8 a 60 kg es una sola alta. */
 function openMwSet() {
   const r = CFG.routines.find(x => x.id === _MW.routineId);
-  const sug = (r ? r.exercises.map(e => exName(e.exId, e.name)) : [])
+  const sug = (r ? routineExercises(r).map(e => exName(e.exId, e.name)) : [])
     .concat((CFG.exercises || []).map(e => e.name))
     .filter((v, i, a) => a.indexOf(v) === i).slice(0, 40);
   sheet(`<h3>Agregar series</h3><div class="mm">El nombre entra al catálogo, así que cuenta para tus records.</div>
@@ -1285,6 +1435,7 @@ function openMwSet() {
     <datalist id="mwExList">${sug.map(nm => `<option value="${esc(nm)}"></option>`).join("")}</datalist>
     <div class="row2"><div><div class="lbl">Peso (${weightUnit()})</div><input id="mwW" class="field" inputmode="decimal" placeholder="60"></div>
       <div><div class="lbl">Reps</div><input id="mwR" class="field" inputmode="numeric" placeholder="8"></div></div>
+    <div class="lbl">Segundos (si es por tiempo)</div><input id="mwS" class="field" inputmode="numeric" placeholder="—">
     <div class="lbl">¿Cuántas series iguales?</div><input id="mwN" class="field" type="number" inputmode="numeric" min="1" value="1">
     <button class="btn p" onclick="addMwSet()">Agregar</button>
     <button class="btn g" onclick="renderManualWorkout()">Cancelar</button>`);
@@ -1297,20 +1448,26 @@ function addMwSet() {
   const w = (document.getElementById("mwW").value || "").trim();
   const reps = (document.getElementById("mwR").value || "").trim();
   const n = Math.max(1, parseInt(document.getElementById("mwN").value, 10) || 1);
-  for (let i = 0; i < n; i++) _MW.sets.push({ exName: cat.name, exId: cat.id, weight: w, reps: reps });
+  const secEl = document.getElementById("mwS"), sec = parseInt(secEl ? secEl.value : "", 10);
+  for (let i = 0; i < n; i++) {
+    const row = { exName: cat.name, exId: cat.id, weight: w, reps: reps };
+    if (!isNaN(sec) && sec > 0) row.secs = sec;
+    _MW.sets.push(row);
+  }
   saveCfg();
   renderManualWorkout();
 }
 function saveManualWorkout() {
   if (!_MW || !_MW.sets.length) return;
-  const d = clampPast(_MW.date);
+  const d = validPast(_MW.date);
+  if (!d) { _MW.err = `<span style="color:var(--bad)">Esa fecha aún no llega. Solo puedes registrar días que ya pasaron.</span>`; renderManualWorkout(); return; }
   const vol = _MW.sets.reduce((a, s) => { const w = parseFloat(s.weight), r = parseInt(s.reps, 10); return a + (isNaN(w) || isNaN(r) ? 0 : w * r); }, 0);
   const mins = parseInt(_MW.dur, 10);
   WORKOUTS.push({
     id: uid("w"), date: d, activityId: "gym", type: "strength",
     routineId: _MW.routineId || null, name: _MW.name || "Entreno",
     duration: isNaN(mins) ? 0 : mins * 60, volume: vol, unit: weightUnit(),
-    sets: _MW.sets.map(s => ({ exName: s.exName, exId: s.exId, reps: s.reps, weight: s.weight }))
+    sets: _MW.sets.map(s => { const o = { exName: s.exName, exId: s.exId, reps: s.reps, weight: s.weight }; if (s.secs) o.secs = s.secs; return o; })
   });
   saveWorkouts(); markGymHabit(d);
   _MW = null; closeModal(); render();
@@ -1876,6 +2033,7 @@ function applyBackup(text) {
 }
 function refreshState() {
   CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts(); BIZ = loadBiz();
+  migrateRoutineBlocks();  // rutinas planas -> un bloque principal
   migrateExercises();   // un respaldo viejo puede venir sin catálogo
   migrateLeadUnits();   // los leads de antes no traían unidad
   PROG = store.get("mt_prog") || "semana";
@@ -2272,6 +2430,31 @@ function nextStage(st) { const i = LEAD_OPEN.indexOf(st); return (i >= 0 && i < 
    de la visa en USD; un total combinado sería un número falso. */
 const LEAD_NO_UNIT = "sin unidad";
 function leadUnit(l) { return ((l && l.unit) || "").trim(); }
+/* Se compara normalizado (igual que `exKey` con los ejercicios): "usd",
+   "USD" y " Usd " son la MISMA unidad y no abren dos cubetas. Se conserva la
+   grafía que escribiste; solo la comparación es insensible. */
+function unitKey(u) { return exKey(u); }
+/* Todas las unidades que ya usaste, con la grafía más frecuente de cada una. */
+function knownLeadUnits() {
+  const by = {};
+  (BIZ.leads || []).forEach(l => {
+    const u = leadUnit(l); if (!u) return;
+    const k = unitKey(u);
+    if (!by[k]) by[k] = {};
+    by[k][u] = (by[k][u] || 0) + 1;
+  });
+  return Object.keys(by).map(k => {
+    const forms = by[k];
+    const best = Object.keys(forms).sort((a, b) => forms[b] - forms[a])[0];
+    return { key: k, label: best, n: Object.keys(forms).reduce((a, f) => a + forms[f], 0) };
+  }).sort((a, b) => b.n - a.n);
+}
+/* Si ya usaste esa unidad con otra grafía, se reusa la que ya tenías. */
+function canonicalLeadUnit(u) {
+  const t = (u || "").trim(); if (!t) return "";
+  const hit = knownLeadUnits().find(x => x.key === unitKey(t));
+  return hit ? hit.label : t;
+}
 function fmtMoney(v, unit) { const n = Number(v); return (!v && v !== 0) || isNaN(n) ? "" : fmtNum(n, unit); }
 function stageLeads(st) { return BIZ.leads.filter(l => l.stage === st).sort((a, b) => leadRank(a) - leadRank(b) || (a.stageAt || 0) - (b.stageAt || 0)); }
 /* No existe un `sumValue` a secas a propósito: un helper que sume todos los
@@ -2284,22 +2467,19 @@ function leadUnitTotals(list) {
     const v = Number(l.value);
     if (!l.value && l.value !== 0) return;
     if (isNaN(v) || !v) return;
-    const u = leadUnit(l) || LEAD_NO_UNIT;
-    by[u] = (by[u] || 0) + v;
+    const raw = leadUnit(l) || LEAD_NO_UNIT;
+    const k = unitKey(raw) || LEAD_NO_UNIT;      // "usd" y "USD" son la misma cubeta
+    if (!by[k]) by[k] = { unit: raw, sum: 0 };
+    by[k].sum += v;
   });
-  return Object.keys(by).map(u => ({ unit: u, sum: by[u] })).sort((a, b) => b.sum - a.sum);
+  return Object.keys(by).map(k => by[k]).sort((a, b) => b.sum - a.sum);
 }
 function unitTotalsText(list) {
   return leadUnitTotals(list).map(t => fmtNum(t.sum, t.unit === LEAD_NO_UNIT ? "" : t.unit)).join(" · ");
 }
 /* La unidad que más usas: para que un prospecto nuevo no arranque en blanco
    sin inventarte una moneda que nunca escribiste. */
-function commonLeadUnit() {
-  const c = {};
-  BIZ.leads.forEach(l => { const u = leadUnit(l); if (u) c[u] = (c[u] || 0) + 1; });
-  const ks = Object.keys(c).sort((a, b) => c[b] - c[a]);
-  return ks[0] || "";
-}
+function commonLeadUnit() { const ks = knownLeadUnits(); return ks.length ? ks[0].label : ""; }
 /* Migración aditiva: los leads de antes de esta versión no traen unidad.
    Se les pone cadena vacía (no se les inventa una moneda). */
 function migrateLeadUnits() {
@@ -2383,7 +2563,7 @@ function saveLead(id) {
     contact: document.getElementById("lgContact").value.trim(),
     stage: LEAD_STAGES.indexOf(_leadStage) >= 0 ? _leadStage : "nuevo",
     value: (raw === "" || isNaN(Number(raw))) ? "" : Number(raw),
-    unit: (document.getElementById("lgUnit").value || "").trim(),
+    unit: canonicalLeadUnit(document.getElementById("lgUnit").value),
     followUp: document.getElementById("lgFollow").value || "",
     notes: document.getElementById("lgNotes").value.trim(),
     projectId: _leadProject || ""
@@ -2632,6 +2812,7 @@ function openFocusEdit(id) {
     <div class="row2"><div><div class="lbl">Minutos</div><input id="feMin" class="field" type="number" inputmode="numeric" min="1" value="${Math.max(1, Math.round((f.seconds || 0) / 60))}"></div>
       <div><div class="lbl">Día</div><input id="feDate" class="field" type="date" max="${today()}" value="${esc(f.date)}"></div></div>
     <div class="lbl">Nota (opcional)</div><input id="feNote" class="field" value="${esc(f.note || "")}" placeholder="En qué se fue el tiempo">
+    <div id="feMsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="saveFocusEdit('${id}')">Guardar</button>
     <button class="btn g" style="color:var(--bad)" onclick="confirmDelFocus('${id}')">Borrar sesión</button>
     <button class="btn g" onclick="${p ? `openBizProject('${p.id}')` : "closeModal()"}">Cancelar</button>`);
@@ -2640,9 +2821,10 @@ function saveFocusEdit(id) {
   const f = BIZ.focus.find(x => x.id === id); if (!f) return;
   const min = parseInt(document.getElementById("feMin").value, 10);
   if (!min || min <= 0) return;
-  const d = document.getElementById("feDate").value || f.date;
+  const d = validPast(document.getElementById("feDate").value || f.date);
+  if (!d) { futureDateMsg("feMsg"); return; }
   f.seconds = min * 60;
-  f.date = d > today() ? today() : d;          // nunca al futuro
+  f.date = d;
   f.note = document.getElementById("feNote").value.trim();
   saveBiz(); closeModal(); render();
 }

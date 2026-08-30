@@ -135,6 +135,7 @@ function syncNavHeight() {
 
 /* ---------- Init de la app ---------- */
 freezePastDays();
+migrateRoutineBlocks();  // rutinas planas -> un bloque principal (aditivo)
 migrateExercises();   // catálogo de ejercicios: idempotente, solo agrega
 migrateLeadUnits();   // unidad por lead: aditiva, no inventa moneda
 buildNav();
