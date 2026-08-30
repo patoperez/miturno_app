@@ -579,12 +579,17 @@ function renderPlayer() {
     <div class="pl-actions"><button class="pl-primary" onclick="continueNext()">Continuar</button></div>`;
   } else {
     const total = P.log.length, vol = P.log.reduce((a, s) => { const w = parseFloat(s.weight), rp = parseInt(s.reps); return a + (isNaN(w) || isNaN(rp) ? 0 : w * rp); }, 0);
-    const nprs = (P.prs || []).length;
+    /* Si subiste tres veces el mismo ejercicio, es UN record (el ultimo), no
+       tres: se deja solo la mejor marca de cada uno. */
+    const porEj = {};
+    (P.prs || []).forEach(x => { porEj[x.name] = x; });
+    const prs = Object.keys(porEj).map(k => porEj[k]);
+    const nprs = prs.length;
     const nb = routineBlocks(r).length;
     body = `<div class="pl-mid"><div class="pl-done big">${icon("check")}</div><div class="pl-ex">¡Rutina terminada!</div>
       <div class="pl-summary">${P.plan.length} ejercicios en ${nb} ${nb === 1 ? "bloque" : "bloques"} · ${total} series${vol ? " · " + Math.round(vol) + " " + U + " de volumen" : ""} · ${fmtTime(elapsed())}</div>
       ${nprs ? `<div class="pl-pr">${icon("trophy")}<div><b>${nprs === 1 ? "1 nuevo record" : nprs + " nuevos records"}</b>
-        <span>${P.prs.map(x => esc(x.name) + " " + esc(x.label)).join(" · ")}</span></div></div>` : ""}
+        <span>${prs.map(x => esc(x.name) + " " + esc(x.label)).join(" · ")}</span></div></div>` : ""}
       <div class="pl-note">Un voto más por el cuerpo que quieres.</div></div>
     <div class="pl-actions"><button class="pl-primary" onclick="finishWorkout()">Guardar entreno</button></div>`;
   }
