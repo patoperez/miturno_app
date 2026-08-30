@@ -61,8 +61,26 @@ function loadTasks() { try { return JSON.parse(store.get("mt_tasks") || "[]"); }
 function saveTasks() { store.set("mt_tasks", JSON.stringify(TASKS)); }
 function loadWorkouts() { try { return JSON.parse(store.get("mt_workouts") || "[]"); } catch (e) { return []; } }
 function saveWorkouts() { store.set("mt_workouts", JSON.stringify(WORKOUTS)); }
+/* ---------- Negocio (clave `mt_biz`) ----------
+   Almacén propio, aparte de CFG: son datos, no configuración. Los
+   contenedores vacíos (leads, metrics, mvals, ideas, focus, reviews) existen
+   desde ya para que la siguiente entrega agregue comportamiento sin migrar
+   nada. Viene VACÍO a propósito: el repo es público. */
+const DEFAULT_BIZ = { projects: [], leads: [], metrics: [], mvals: {}, ideas: [], focus: [], reviews: {} };
+function loadBiz() {
+  let b; try { b = JSON.parse(store.get("mt_biz")); } catch (e) { b = null; }
+  if (!b || typeof b !== "object" || Array.isArray(b)) b = {};
+  /* Tolerante a un objeto parcial: una instalación vieja, un respaldo de
+     antes de esta versión o un JSON a medias no deben romper la sección. */
+  const arr = k => { b[k] = Array.isArray(b[k]) ? b[k] : []; };
+  const obj = k => { b[k] = (b[k] && typeof b[k] === "object" && !Array.isArray(b[k])) ? b[k] : {}; };
+  ["projects", "leads", "metrics", "ideas", "focus"].forEach(arr);
+  ["mvals", "reviews"].forEach(obj);
+  return b;
+}
+function saveBiz() { store.set("mt_biz", JSON.stringify(BIZ)); }
 
-let LOG = loadLog(), TASKS = loadTasks(), WORKOUTS = loadWorkouts();
+let LOG = loadLog(), TASKS = loadTasks(), WORKOUTS = loadWorkouts(), BIZ = loadBiz();
 let VIEW = "hoy";
 /* Vista a la que vuelve el engrane cuando ya estás dentro de Ajustes.
    Ajustes salió de la barra inferior: no gasta un lugar fijo por algo que
@@ -74,7 +92,7 @@ let VDAY = today();
 let PROG = store.get("mt_prog") || "semana"; // semana | mes | bitacora
 let CALYM = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
 const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_ex: true, w_rt: true, w_act: true, p_met: true };
-const DEFAULT_HOY_ORDER = ["review", "hab", "com", "gym", "meal", "metric", "task", "next", "sleep", "mood", "journal"];
+const DEFAULT_HOY_ORDER = ["review", "hab", "com", "biz", "gym", "meal", "metric", "task", "next", "sleep", "mood", "journal"];
 let HOY_ORDER = (() => {
   let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; }
   if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice();
@@ -537,6 +555,7 @@ function renderHoy() {
     `<div class="empty" style="padding:6px 6px 10px;text-align:left">${isT ? "Marca lo que hoy lograste NO hacer. Cada día limpio suma a tu racha." : "Marca lo que ese día lograste NO hacer."}</div>`
     + CFG.commitments.map(x => commitmentRow(x, d)).join("")
     + `<button class="addbtn" onclick="openEditCommit()">${icon("plus")} Agregar compromiso</button>`, "flame", "var(--ok)");
+  B.biz = bizSection(d);
   B.gym = gymCardHoy(d);
   B.meal = mealsSection(d);
   const tt = TASKS.filter(t => t.date === d);
@@ -1701,7 +1720,10 @@ function exportMeals() {
 }
 
 /* ---------- Respaldo (exportar / importar todos los datos) ---------- */
-const BACKUP_KEYS = ["mt_cfg", "mt_log", "mt_tasks", "mt_workouts", "mt_prog", "mt_hoyOrder", "mt_todayRoutine", "mt_activeWorkout"];
+/* mt_biz VA AQUÍ. Sin esta línea la sección de Negocio queda fuera del
+   respaldo y fuera de la sincronización con Supabase (sync.js recorre esta
+   misma lista), y se perdería en silencio al cambiar de dispositivo. */
+const BACKUP_KEYS = ["mt_cfg", "mt_log", "mt_tasks", "mt_workouts", "mt_prog", "mt_hoyOrder", "mt_todayRoutine", "mt_activeWorkout", "mt_biz"];
 function buildBackup() {
   const data = {};
   BACKUP_KEYS.forEach(k => { const v = store.get(k); if (v != null) data[k] = v; });
@@ -1740,7 +1762,7 @@ function applyBackup(text) {
   return true;
 }
 function refreshState() {
-  CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts();
+  CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts(); BIZ = loadBiz();
   migrateExercises();   // un respaldo viejo puede venir sin catálogo
   PROG = store.get("mt_prog") || "semana";
   HOY_ORDER = (() => { let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; } if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice(); o = o.filter(k => DEFAULT_HOY_ORDER.includes(k)); DEFAULT_HOY_ORDER.forEach(k => { if (!o.includes(k)) o.push(k); }); return o; })();
@@ -1756,26 +1778,231 @@ function importFromFile(input) {
 }
 
 /* ========================= NEGOCIO =========================
-   Sección nueva. Todavía no tiene almacén propio: el modelo de datos
-   (`mt_biz`) llega en la siguiente entrega, junto con pipeline, métricas,
-   ideas y sesiones de foco. Por ahora la pestaña existe y no miente: no
-   inventa datos ni guarda nada. */
+   La idea central: cada proyecto tiene UNA sola próxima acción. No una lista
+   de tareas por proyecto — un solo paso concreto. Eso es lo que mata la
+   parálisis de "¿y ahora qué hago?". Un proyecto sin próxima acción es un
+   proyecto detenido, así que la tarjeta lo reclama en vez de disimularlo. */
+const BIZ_STATUS = ["activo", "pausado", "terminado"];
+const BIZ_STALE_DAYS = 14;   // dos semanas sin tocarlo = está estancado
+
+function bizProject(id) { return BIZ.projects.find(p => p.id === id) || null; }
+function touchProject(p) { p.updatedAt = Date.now(); }
+function daysSince(ts) { return ts ? Math.floor((Date.now() - ts) / 86400000) : null; }
+function agoLabel(ts) {
+  const d = daysSince(ts);
+  if (d === null) return "sin actividad";
+  if (d <= 0) return "hoy";
+  if (d === 1) return "ayer";
+  if (d < 30) return "hace " + d + " días";
+  const m = Math.floor(d / 30);
+  return m === 1 ? "hace 1 mes" : "hace " + m + " meses";
+}
+function isStale(p) { const d = daysSince(p.updatedAt); return p.status === "activo" && d !== null && d >= BIZ_STALE_DAYS; }
+/* Estado de la fecha de la próxima acción. Las fechas son "YYYY-MM-DD", así
+   que comparar como texto alcanza. */
+function dueState(p) {
+  if (!p.nextAction || !p.nextActionDue) return null;
+  const t = today();
+  if (p.nextActionDue < t) return "vencida";
+  if (p.nextActionDue === t) return "hoy";
+  return "futura";
+}
+/* Orden de atención (menor = más arriba): lo vencido, lo de hoy, los
+   proyectos sin próxima acción escrita (no se avanza lo que no está
+   definido), los estancados, y al final el resto. A igualdad, primero el
+   que lleva más tiempo sin tocarse. */
+function projectRank(p) {
+  const ds = dueState(p);
+  if (ds === "vencida") return 0;
+  if (ds === "hoy") return 1;
+  if (!p.nextAction) return 2;
+  if (isStale(p)) return 3;
+  return 4;
+}
+function byAttention(a, b) {
+  const r = projectRank(a) - projectRank(b);
+  if (r) return r;
+  return (a.updatedAt || 0) - (b.updatedAt || 0);
+}
+function activeProjects() { return BIZ.projects.filter(p => p.status === "activo").sort(byAttention); }
+
+function dueChip(p) {
+  const ds = dueState(p);
+  if (!ds) return "";
+  const cls = ds === "vencida" ? " venc" : (ds === "hoy" ? " hoy" : "");
+  const txt = ds === "vencida" ? "Vencida · " + fmtShort(p.nextActionDue)
+            : ds === "hoy" ? "Para hoy" : "Para el " + fmtShort(p.nextActionDue);
+  return `<span class="bizdue${cls}">${txt}</span>`;
+}
+/* El bloque de próxima acción: lo más importante de la tarjeta. Si no hay,
+   ocupa el mismo espacio pero en ámbar reclamando que la definas. */
+function nextActionBlock(p) {
+  if (!p.nextAction) {
+    return `<div class="bizna nag" onclick="event.stopPropagation();openNextAction('${p.id}')">
+      <div class="lbl2">Próxima acción</div>
+      <div class="txt">${icon("plus")} Define el siguiente paso</div></div>`;
+  }
+  const stale = isStale(p) ? `<span class="bizdue bizstale">${icon("clock")}${agoLabel(p.updatedAt)}</span>` : "";
+  return `<div class="bizna">
+    <div class="lbl2">Próxima acción</div>
+    <div class="txt">${esc(p.nextAction)}</div>
+    <div class="foot">${dueChip(p)}${stale}
+      <button class="done" onclick="event.stopPropagation();completeNextAction('${p.id}')">${icon("check")}Listo</button></div></div>`;
+}
+function projectCard(p) {
+  const st = isStale(p);
+  return `<div class="gcard" style="background:linear-gradient(135deg, ${p.color}22, var(--card))" onclick="openBizProject('${p.id}')">
+    <div class="top"><span class="gicon" style="background:${p.color}22;color:${p.color}">${icon("ingresos")}</span>
+      <div style="flex:1;min-width:0"><div class="gt">${esc(p.name)}</div>
+        <div class="bizmeta"><span class="dot" style="background:${p.color}"></span>${esc(p.status)}
+          <span class="${st ? "bizstale" : ""}">· ${agoLabel(p.updatedAt)}</span></div></div></div>
+    ${p.why ? `<div class="gw">${esc(p.why)}</div>` : ""}
+    ${nextActionBlock(p)}</div>`;
+}
+
 function renderNegocio() {
+  const act = activeProjects();
+  const otros = BIZ.projects.filter(p => p.status !== "activo")
+    .sort((a, b) => (a.status === b.status ? (b.updatedAt || 0) - (a.updatedAt || 0) : a.status === "pausado" ? -1 : 1));
   let out = header("Negocio", "Tu trabajo, con la misma disciplina");
+
+  if (!BIZ.projects.length) {
+    out += `<div class="hero" style="background:linear-gradient(140deg, #10B98133, var(--card) 70%)">
+      <div class="hero-top"><span class="hero-tag" style="color:var(--ingresos);background:#10B98122">${icon("ingresos")} Negocio</span></div>
+      <div class="hero-title">Empieza por un proyecto</div>
+      <div class="hero-sub">Cada proyecto lleva UNA próxima acción: el paso concreto que sigue. Nada más. Eso es lo que evita quedarte viendo la pantalla sin saber por dónde entrar.</div>
+      <button class="hero-cta" style="background:var(--ingresos)" onclick="openBizProject()">${icon("plus")} Nuevo proyecto</button></div>`;
+    app.innerHTML = out;
+    return;
+  }
+
+  const sinAccion = act.filter(p => !p.nextAction).length;
+  const vencidas = act.filter(p => dueState(p) === "vencida").length;
+  const estancados = act.filter(isStale).length;
+  const avisos = [];
+  if (vencidas) avisos.push(vencidas === 1 ? "1 acción vencida" : vencidas + " acciones vencidas");
+  if (sinAccion) avisos.push(sinAccion === 1 ? "1 sin próxima acción" : sinAccion + " sin próxima acción");
+  if (estancados) avisos.push(estancados === 1 ? "1 estancado" : estancados + " estancados");
   out += `<div class="hero" style="background:linear-gradient(140deg, #10B98133, var(--card) 70%)">
-    <div class="hero-top"><span class="hero-tag" style="color:var(--ingresos);background:#10B98122">${icon("ingresos")} En construcción</span></div>
-    <div class="hero-title">Aquí va tu negocio</div>
-    <div class="hero-sub">La misma disciplina que le das a tus hábitos y a tus entrenos, aplicada a lo que estás construyendo.</div></div>`;
-  out += sec("n_soon", "Lo que viene", "",
-    `<div class="empty" style="text-align:left;padding:2px 6px 10px">Nada de esto guarda datos todavía.</div>`
-    + [["Pipeline", "Prospectos y su avance", "list"],
-       ["Métricas del negocio", "Los números que sí mueves", "chart"],
-       ["Ideas", "Lo que se te ocurre, antes de que se te olvide", "star"],
-       ["Sesiones de foco", "Trabajo profundo, medido", "timer2"]]
-      .map(([t, d, ic]) => `<div class="row"><span class="idi" style="background:#10B98122;color:var(--ingresos)">${icon(ic)}</span>
-        <div class="body"><div class="name">${esc(t)}</div><div class="sub">${esc(d)}</div></div></div>`).join(""),
-    "ingresos", "var(--ingresos)");
+    <div class="hero-top"><span class="hero-tag" style="color:var(--ingresos);background:#10B98122">${icon("ingresos")} Negocio</span></div>
+    <div class="hero-title">${act.length} ${act.length === 1 ? "proyecto activo" : "proyectos activos"}</div>
+    <div class="hero-sub">${avisos.length ? esc(avisos.join(" · ")) : "Todo con su próximo paso definido y al día."}</div></div>`;
+
+  out += act.map(projectCard).join("");
+  out += `<button class="addbtn" onclick="openBizProject()">${icon("plus")} Nuevo proyecto</button>`;
+  if (otros.length) {
+    out += sec("n_otros", "Pausados y terminados", String(otros.length),
+      otros.map(p => `<div class="row" onclick="openBizProject('${p.id}')">
+        <span class="dotc" style="background:${p.color}"></span>
+        <div class="body"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.status)} · ${agoLabel(p.updatedAt)}</div></div>
+        <span class="chev">${icon("chevron")}</span></div>`).join(""), "list", "var(--muted)");
+  }
   app.innerHTML = out;
+}
+
+/* ---------- Editar un proyecto ---------- */
+let _bizColor = PALETTE[5], _bizStatus = "activo";
+function pickBizColor(c) {
+  _bizColor = c;
+  document.querySelectorAll("#bpColors .sw").forEach(s => s.classList.toggle("on", rgbToHex(s.style.background) === c.toLowerCase()));
+}
+function pickBizStatus(s) {
+  _bizStatus = s;
+  document.querySelectorAll("#bpStatus button").forEach(b => b.classList.toggle("on", b.dataset.s === s));
+}
+function openBizProject(id) {
+  const editing = !!id;
+  const p = editing ? bizProject(id) : null;
+  if (editing && !p) return render();
+  const v = p || { name: "", color: PALETTE[5], status: "activo", why: "", nextAction: "", nextActionDue: "" };
+  _bizColor = v.color; _bizStatus = v.status;
+  sheet(`<h3>${editing ? "Editar proyecto" : "Nuevo proyecto"}</h3>
+    <div class="mm">${editing ? "Actualizado " + agoLabel(v.updatedAt) : "Un frente de trabajo: un producto, un cliente, un ahorro."}</div>
+    <div class="lbl">Nombre</div><input id="bpName" class="field" value="${esc(v.name)}" placeholder="CRM">
+    <div class="lbl">Color</div><div class="swatches" id="bpColors">${PALETTE.map(c => `<span class="sw ${c === v.color ? "on" : ""}" style="background:${c}" onclick="pickBizColor('${c}')"></span>`).join("")}</div>
+    <div class="lbl">Estado</div><div class="seg small" id="bpStatus">${BIZ_STATUS.map(s => `<button data-s="${s}" class="${s === v.status ? "on" : ""}" onclick="pickBizStatus('${s}')">${cap(s)}</button>`).join("")}</div>
+    <div class="lbl">Mi para qué</div><textarea id="bpWhy" placeholder="¿Por qué existe este proyecto?">${esc(v.why)}</textarea>
+    <div class="lbl">Próxima acción</div><input id="bpNa" class="field" value="${esc(v.nextAction)}" placeholder="El siguiente paso concreto">
+    <div class="lbl">¿Para cuándo? (opcional)</div><input id="bpDue" class="field" type="date" value="${esc(v.nextActionDue || "")}">
+    <button class="btn p" onclick="saveBizProject('${editing ? id : ""}')">${editing ? "Guardar" : "Crear proyecto"}</button>
+    ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelProject('${id}')">Borrar proyecto</button>` : ""}
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function saveBizProject(id) {
+  const name = document.getElementById("bpName").value.trim();
+  if (!name) return;
+  const data = {
+    name,
+    color: _bizColor,
+    status: BIZ_STATUS.indexOf(_bizStatus) >= 0 ? _bizStatus : "activo",
+    why: document.getElementById("bpWhy").value.trim(),
+    nextAction: document.getElementById("bpNa").value.trim(),
+    nextActionDue: document.getElementById("bpDue").value || ""
+  };
+  if (!data.nextAction) data.nextActionDue = "";   // sin acción no hay fecha que valga
+  const p = id ? bizProject(id) : null;
+  if (p) Object.assign(p, data), touchProject(p);
+  else { const np = Object.assign({ id: uid("pj") }, data); touchProject(np); BIZ.projects.push(np); }
+  saveBiz(); closeModal(); render();
+}
+function confirmDelProject(id) {
+  const p = bizProject(id); if (!p) return;
+  sheet(`<h3>¿Borrar "${esc(p.name)}"?</h3><div class="mm">Se borra el proyecto y su próxima acción. Esto no se puede deshacer.</div>
+    <button class="btn p" style="background:var(--bad)" onclick="delBizProject('${id}')">Sí, borrar</button>
+    <button class="btn g" onclick="openBizProject('${id}')">Cancelar</button>`);
+}
+function delBizProject(id) { BIZ.projects = BIZ.projects.filter(p => p.id !== id); saveBiz(); closeModal(); render(); }
+
+/* ---------- La próxima acción ----------
+   Terminar una acción deja el proyecto sin siguiente paso, que es justo el
+   estado que no queremos. Por eso completar abre de inmediato la pregunta
+   "¿y ahora qué sigue?": un tap para marcar, escribir, un tap para guardar. */
+function completeNextAction(id) {
+  const p = bizProject(id); if (!p) return;
+  p.nextAction = ""; p.nextActionDue = ""; touchProject(p); saveBiz();
+  openNextAction(id, true);
+}
+function openNextAction(id, justDone) {
+  const p = bizProject(id); if (!p) return;
+  sheet(`<h3>${justDone ? "Hecho. ¿Y ahora qué sigue?" : "Próxima acción"}</h3>
+    <div class="mm">${esc(p.name)} · un solo paso concreto, el más pequeño que te mueva.</div>
+    <div class="lbl">Próxima acción</div><input id="naTxt" class="field" value="${esc(p.nextAction)}" placeholder="Llamar a...">
+    <div class="lbl">¿Para cuándo? (opcional)</div><input id="naDue" class="field" type="date" value="${esc(p.nextActionDue || "")}">
+    <button class="btn p" onclick="saveNextAction('${id}')">Guardar</button>
+    <button class="btn g" onclick="closeModal();render()">${justDone ? "Ahora no" : "Cancelar"}</button>`);
+  const el = document.getElementById("naTxt"); if (el) { el.focus(); el.select(); }
+}
+function saveNextAction(id) {
+  const p = bizProject(id); if (!p) return;
+  p.nextAction = document.getElementById("naTxt").value.trim();
+  p.nextActionDue = p.nextAction ? (document.getElementById("naDue").value || "") : "";
+  touchProject(p); saveBiz(); closeModal(); render();
+}
+/* Desde Hoy: pararse en el proyecto. */
+function gotoProject(id) { VIEW = "negocio"; buildNav(); render(); openBizProject(id); }
+
+/* ---------- Negocio en Hoy ----------
+   Un empujón, no la lista completa: solo lo que pide atención. Se esconde
+   si no hay proyectos activos (mismo criterio que las métricas) y en un día
+   pasado, porque la próxima acción es de ahora: no hay registro de cuál era
+   la próxima acción de un martes de hace tres semanas. */
+const BIZ_HOY_CAP = 4;
+function bizSection(d) {
+  if (d !== today()) return null;
+  const act = activeProjects();
+  if (!act.length) return null;
+  const pick = act.filter(p => projectRank(p) <= 3).slice(0, BIZ_HOY_CAP);
+  const body = pick.length ? pick.map(p => {
+    const nag = !p.nextAction;
+    return `<div class="row" onclick="gotoProject('${p.id}')">
+      <span class="dotc" style="background:${p.color}"></span>
+      <div class="body"><div class="name"${nag ? ` style="color:var(--lectura)"` : ""}>${nag ? "Define la próxima acción" : esc(p.nextAction)}</div>
+        <div class="sub">${esc(p.name)}${dueState(p) === "vencida" ? ` · <span style="color:var(--bad)">vencida</span>` : dueState(p) === "hoy" ? ` · <span style="color:var(--ingresos)">para hoy</span>` : isStale(p) ? ` · <span style="color:var(--lectura)">${agoLabel(p.updatedAt)}</span>` : ""}</div></div>
+      <span class="chev">${icon("chevron")}</span></div>`;
+  }).join("") : `<div class="empty">Nada urgente en tus proyectos. Sigue con lo tuyo.</div>`;
+  return sec("h_biz", "Negocio", pick.length ? String(pick.length) : "al día",
+    body + `<button class="addbtn" onclick="VIEW='negocio';buildNav();render()">${icon("ingresos")} Ver Negocio</button>`,
+    "ingresos", "var(--ingresos)");
 }
 
 /* ---------- Navegación ---------- */

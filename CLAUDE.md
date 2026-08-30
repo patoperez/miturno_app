@@ -48,6 +48,34 @@ App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, com
 - **Fusionar** (`mergeExercises(keepId, dropId)`) mueve las series y las rutinas al id que sobrevive y deja el nombre perdedor (y sus alias) como alias. **No borra ningún entreno ni ninguna serie.**
 - **Duplicados**: `dupCandidates()` solo **propone**, nunca fusiona sola. Dos señales, basta una: solape de tokens (Jaccard ≥ 0.7, sin conectores y con el plural recortado) o errata (mismo número de palabras y ≤ 1 carácter de diferencia en total, alineadas por posición). **No se usa distancia de edición sobre la cadena completa**: sobre nombres largos es engañosa — "Enfriamiento · Estiramientos (PUSH)" y "... (PULL)" se parecen 94% carácter a carácter y son ejercicios distintos. El usuario confirma o rechaza cada par en la tarjeta "Posibles duplicados" de Workouts.
 
+## Negocio (`BIZ`, clave `mt_biz`)
+Almacén propio, **aparte de `CFG`**: son datos, no configuración. `loadBiz()` / `saveBiz()` siguen el mismo patrón que `LOG`/`TASKS`/`WORKOUTS`.
+
+```
+BIZ
+  projects[]  {id, name, color, status, why, nextAction, nextActionDue, updatedAt}
+  leads[]     vacío  (pipeline, siguiente entrega)
+  metrics[]   vacío  (siguiente entrega)
+  mvals{}     vacío  (siguiente entrega)
+  ideas[]     vacío  (siguiente entrega)
+  focus[]     vacío  (siguiente entrega)
+  reviews{}   vacío  (siguiente entrega)
+```
+
+- Los contenedores vacíos **existen desde ya** para que la siguiente entrega agregue comportamiento sin migrar nada.
+- `status` es `"activo" | "pausado" | "terminado"` (`BIZ_STATUS`). `color` sale de `PALETTE`. `updatedAt` se refresca en **cada** edición vía `touchProject(p)`.
+- `loadBiz()` es **tolerante**: si la clave falta, trae basura, un arreglo, o un objeto a medias, rellena cada contenedor con su tipo correcto y conserva lo que sí venía. Una instalación vieja o un respaldo anterior a esta versión no rompen la sección.
+- **`mt_biz` está en `BACKUP_KEYS`.** Sin esa línea, Negocio quedaría fuera del respaldo **y** de la sincronización con Supabase (`sync.js` recorre esa misma lista) y se perdería en silencio al cambiar de dispositivo. Si agregas otro almacén, agrégalo también ahí.
+
+### Proyectos: una sola próxima acción
+La idea central es que **cada proyecto tiene UNA próxima acción**, no una lista de tareas. Un proyecto sin próxima acción está detenido, así que la tarjeta lo reclama en ámbar (`.bizna.nag`) en vez de disimularlo.
+- `projectRank(p)` ordena por atención: **0** vencida, **1** para hoy, **2** sin próxima acción, **3** estancado, **4** el resto. A igualdad gana el que lleva más tiempo sin tocarse (`byAttention`).
+- `isStale(p)`: **`BIZ_STALE_DAYS` = 14** días sin tocar, y solo cuenta para proyectos activos (un pausado no "se estanca"). Se pinta en ámbar (`.bizstale`) tanto en la línea de estado como en un chip junto a la acción.
+- `dueState(p)` compara `nextActionDue` con `today()` como texto (`YYYY-MM-DD`): `vencida` (rojo), `hoy` (verde) o `futura`.
+- Completar una acción (`completeNextAction`) la vacía y **abre de inmediato** "¿y ahora qué sigue?", para no dejar el proyecto sin siguiente paso. Salir con "Ahora no" es válido: entonces el proyecto queda reclamando.
+- Guardar sin texto de acción **también limpia la fecha**: no quedan fechas huérfanas.
+- Los pausados y terminados van en una sección aparte, abajo.
+
 ## Datos de entrenamiento (`WORKOUTS`, clave `mt_workouts`)
 Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,exId,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
 Cada serie lleva **`exId`** (el ejercicio del catálogo) y **conserva `exName`**: el texto tal como se registró. `exName` **no se borra nunca** — es respaldo para resolver series heredadas y hace el JSON legible a ojo. Se agrega por `exId`, así que dos grafías del mismo ejercicio ya **no** parten el historial.
@@ -62,7 +90,7 @@ Al registrar una serie, el reproductor compara contra el PR guardado **y** contr
 - Tres importadores JSON, todos con el mismo patrón: **plan** (metas/hábitos/compromisos/métricas), **comidas** y **rutinas**.
 - Reusar el lenguaje visual existente (`.row`, `.sec`, `.sheet`, `.field`, `.addbtn`, `.chip`, `.streak`, `.dotc`) antes de inventar clases nuevas.
 - UI en español.
-- **Local-first:** los datos viven en `localStorage` bajo claves `mt_*` (`mt_cfg`, `mt_log`, `mt_tasks`, `mt_workouts`, `mt_prog`, `mt_hoyOrder`, `mt_todayRoutine`, `mt_activeWorkout`, `mt_updated`, `mt_swipeHint`). Las fotos de metas viven en **IndexedDB** (db `miturno`, store `photos`), NO en localStorage. La nube (Supabase, tabla `app_state`) sincroniza el blob de `localStorage` con last-write-wins.
+- **Local-first:** los datos viven en `localStorage` bajo claves `mt_*` (`mt_cfg`, `mt_log`, `mt_tasks`, `mt_workouts`, `mt_biz`, `mt_prog`, `mt_hoyOrder`, `mt_todayRoutine`, `mt_activeWorkout`, `mt_updated`, `mt_swipeHint`). Las fotos de metas viven en **IndexedDB** (db `miturno`, store `photos`), NO en localStorage. La nube (Supabase, tabla `app_state`) sincroniza el blob de `localStorage` con last-write-wins.
 - Historial inmutable **ante cambios de config**: los días pasados se "congelan" (`LOG[d].frozen/pts/max`), así que agregar o quitar hábitos no reescribe el pasado. Pero editar un día a propósito **sí** mueve su puntaje: toda mutación de un día (`toggleHabit`, `toggleCommit`, `toggleMenu`, `setFicha`, `toggleInneg`, guardar/quitar métrica, `setSleep`, `setMood`, `setJournal`) llama a `recalcDay(d)`, que recalcula **solo `pts`** con `rawPoints(d)`. `rawPoints(d)` es la **única** definición de la fórmula (hábitos + compromisos + `mealScore`) y la comparte con `pointsFor`, para que congelado y no congelado nunca diverjan. En un día no congelado `recalcDay` no hace nada: ahí `pointsFor` ya calcula en vivo.
 - **`max` NUNCA encoge.** `max` es el denominador que regía **ese** día, no el de hoy. `recalcDay` hace `l.max = Math.max(l.max || maxPts(), l.pts)`: solo puede crecer, y nunca queda por debajo de los puntos del propio día. Si se pisara con `maxPts()`, borrar hábitos encogería el denominador mientras las marcas viejas siguen en `LOG[d].habits`, y el día pasaría a leerse 3/2 = **150%**. Como red extra, `maxFor(d)` devuelve al menos `pointsFor(d)`, así **ninguna vista puede pintar más de 100%** ni siquiera con historiales que ya quedaron torcidos.
 
@@ -131,6 +159,7 @@ Dos detalles del harness: el stub de elemento necesita `getContext()` para los `
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
+Para Negocio: que crear/editar/borrar un proyecto persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar, que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, y que Hoy se pinte con cero proyectos y con varios.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación
@@ -145,7 +174,10 @@ La barra es para lo que se toca a diario; Ajustes se abre una vez por semana y *
 - El engrane convive con el anillo de progreso y con el estado de día pasado de Hoy (`dayKey` → tinte ámbar + chip "Hoy"). **Al tocar `header()` hay que conservar las tres cosas.**
 
 ### Negocio
-Pestaña nueva (`renderNegocio`, ícono `ingresos`, color `--ingresos`). **Todavía no tiene almacén propio**: por ahora solo pinta un estado vacío honesto que anuncia lo que viene (pipeline, métricas, ideas y sesiones de foco). No inventa datos, no crea `mt_biz` y no toca `BACKUP_KEYS`. El modelo de datos llega en la siguiente entrega.
+Pestaña `renderNegocio` (ícono `ingresos`, color `--ingresos`). Ver "Negocio (`BIZ`, clave `mt_biz`)" para el modelo.
+- En **Hoy** hay una sección `biz` (`bizSection`, clave de orden **`"biz"`** en `DEFAULT_HOY_ORDER`) que es **un empujón, no la lista**: solo los proyectos con `projectRank <= 3` (vencido, para hoy, sin acción o estancado), tope `BIZ_HOY_CAP` = 4. Tocar una fila salta al proyecto (`gotoProject`).
+- Se **esconde** si no hay proyectos activos (mismo criterio que `metricsSection`) y **en un día pasado**, como "Próximas": la próxima acción es de ahora, no hay registro de cuál era la de un martes de hace tres semanas.
+- Agregar una clave a `DEFAULT_HOY_ORDER` es seguro: el cargador de `HOY_ORDER` filtra las desconocidas y **agrega al final** las que falten, así que un `mt_hoyOrder` ya guardado sigue valiendo y solo recibe la clave nueva al final.
 
 ### Hoy puede ver y corregir cualquier día pasado
 - `VDAY` es el día que se está viendo. Arranca en `today()` y **no se persiste**: abrir la app siempre te para en hoy.

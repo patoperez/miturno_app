@@ -354,6 +354,31 @@ textarea::placeholder{color:var(--muted2);}
   font-size:12px; color:var(--muted2);}
 .swipehint .icon{width:13px; height:13px;}
 
+/* ---------- Negocio: proyectos ----------
+   La próxima acción es lo más importante de la tarjeta, así que tiene su
+   propio bloque y no una línea de pie. Sin acción definida, el mismo bloque
+   se pinta en ámbar: un proyecto sin siguiente paso está detenido y eso
+   tiene que verse. */
+.bizmeta{display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:3px;}
+.bizmeta .dot{width:7px; height:7px; border-radius:50%; display:inline-block; flex:none;}
+.bizstale{color:var(--lectura);}
+.bizna{margin-top:12px; padding:11px 13px; border-radius:13px; background:var(--card2); border:1px solid var(--line);}
+.bizna .lbl2{font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--muted2);}
+.bizna .txt{font-size:15px; font-weight:650; line-height:1.3; margin-top:3px;}
+.bizna .txt .icon{width:15px; height:15px; vertical-align:-2px; margin-right:4px;}
+.bizna .foot{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px;}
+.bizna .done{display:inline-flex; align-items:center; gap:6px; margin-left:auto; border:none; border-radius:10px;
+  padding:8px 13px; font-size:12px; font-weight:700; background:var(--ok); color:#0E0F13; cursor:pointer;}
+.bizna .done .icon{width:14px; height:14px;} .bizna .done .icon path{stroke:#0E0F13;}
+.bizna.nag{background:rgba(245,158,11,.10); border-color:rgba(245,158,11,.45); cursor:pointer;}
+.bizna.nag .txt{color:var(--lectura);}
+.bizdue{display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; border-radius:8px;
+  padding:4px 8px; border:1px solid var(--line); color:var(--muted);}
+.bizdue .icon{width:12px; height:12px;}
+.bizdue.venc{color:var(--bad); border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.10);}
+.bizdue.hoy{color:var(--ingresos); border-color:rgba(16,185,129,.5); background:rgba(16,185,129,.10);}
+.bizdue.bizstale{border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.10);}
+
 /* ---------- Ejercicios: duplicados y record ---------- */
 .duprow{padding:10px 6px; border-top:1px solid var(--line);}
 .duprow:first-child{border-top:none;}
