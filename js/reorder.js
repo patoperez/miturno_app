@@ -135,6 +135,7 @@ function syncNavHeight() {
 
 /* ---------- Init de la app ---------- */
 freezePastDays();
+migrateExercises();   // catálogo de ejercicios: idempotente, solo agrega
 buildNav();
 render();
 initSwipeHoy();

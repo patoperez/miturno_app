@@ -118,5 +118,11 @@ const DEFAULT_CFG = {
     { id: "gym", name: "Gym", type: "strength", icon: "dumbbell", color: "#FF5A3C" }
   ],
   /* Rutinas de gym. Se crean desde Workouts o se importan por JSON. */
-  routines: []
+  routines: [],
+  /* Catálogo de ejercicios: {id, name, aliases[]}. Es la identidad estable de
+     un ejercicio; el nombre es solo la etiqueta que se muestra. Se llena solo
+     con lo que registras o importas. */
+  exercises: [],
+  /* Pares de ejercicios que ya dijiste que NO son duplicados. */
+  exDismissed: []
 };

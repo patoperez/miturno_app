@@ -30,16 +30,33 @@ App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, com
 - `settings` — `{userName, mealView:"menu"|"fichas", unit:"kg"|"lb", notif:{enabled, morning/midday/night:{on,time}}}`. `unit` se elige desde Workouts, no desde Ajustes.
 - `meals` — `{menu:[{id,name,desc}], fichas:{categories:[{id,name,quota,color}], catalog:{catId:[{food,amount,note}]}, innegociables:[{id,name}]}}`. Solo se muestra el sistema activo (`settings.mealView`).
 - `activities[]` — `{id,name,type,icon,color}`. `type:"strength"` usa el reproductor de rutinas; `type:"class"` se registra por sesión (duración + intensidad + notas).
-- `routines[]` — `{id,name,days:[],exercises:[{id,name,sets,reps,rest,weight,note}]}`. **Los ejercicios se identifican por nombre en texto** (`normName()`); no hay catálogo con IDs todavía.
+- `routines[]` — `{id,name,days:[],exercises:[{id,exId,name,sets,reps,rest,weight,note}]}`. `id` identifica la fila dentro de la rutina; **`exId` apunta al catálogo** y es lo que une el historial. `name` es solo la etiqueta que se muestra (se copia del nombre canónico del catálogo).
+- `exercises[]` — **el catálogo**: `{id, name, aliases:[]}`. Ver "Catálogo de ejercicios".
+- `exDismissed[]` — pares `"idA|idB"` que el usuario ya marcó como NO duplicados, para no volver a proponerlos.
 - `LOG[d].review` — `{worked, failed, change}`. La tarjeta se renderiza domingo y lunes (`reviewDateFor`), pero **siempre escribe sobre el domingo que cerró la semana**: el lunes edita el mismo registro, no crea uno nuevo. Se lee después en Bitácora.
 
+## Catálogo de ejercicios (`CFG.exercises`)
+**Un ejercicio es un ID estable, NO su nombre.** Antes se agregaba por el texto (`normName`), así que "Press de pecho" y "Press pecho" partían el historial en dos y cada importación de rutina podía fragmentarlo más. `normName()` ya no existe.
+
+- `CFG.exercises[] = {id, name, aliases:[]}`. `name` es el nombre canónico (la etiqueta que se muestra); `aliases` son las grafías alternativas que resuelven al mismo id.
+- **`exKey(name)`** es la clave de comparación: sin acentos, sin mayúsculas, sin puntuación y con los espacios colapsados. `"  Préss  DE Pecho!! "` → `"press de pecho"`.
+- **`findOrCreateExercise(name)`** resuelve por `exKey` contra el nombre canónico **y todos los alias**; si acierta reusa ese id, y si no crea una entrada nueva. **Todo** nombre que entra al sistema pasa por aquí: importación de JSON, editor de rutina y registro de series.
+- **`setExId(s)`** da el id de una serie: `s.exId` si lo trae, y si no lo resuelve por `exName` (series heredadas anteriores al catálogo).
+- Agregación: `lastPerf`, `exercisePR`, `allLoggedExercises`, `exSessions` y `exProgress` **agregan por `exId`**, nunca por texto. Aceptan un id o un nombre suelto (`toExId`) por compatibilidad.
+- **Migración** (`migrateExercises()`): construye el catálogo desde `CFG.routines[].exercises[].name` **y** desde todos los `WORKOUTS[].sets[].exName`, y rellena `exId`. Es **idempotente y solo agrega**: nunca borra `exName`, nunca reescribe una serie, nunca tira un entreno. Corre en el init (`reorder.js`) y en `refreshState()` (por si un respaldo viene sin catálogo).
+- **Renombrar** no toca el historial: se agrega por id. El nombre anterior queda como alias automáticamente, así que una importación con el nombre viejo sigue cayendo en el mismo ejercicio. Renombrar a un nombre que ya existe se rechaza (`"clash"`): hay que fusionar, no duplicar.
+- **Fusionar** (`mergeExercises(keepId, dropId)`) mueve las series y las rutinas al id que sobrevive y deja el nombre perdedor (y sus alias) como alias. **No borra ningún entreno ni ninguna serie.**
+- **Duplicados**: `dupCandidates()` solo **propone**, nunca fusiona sola. Dos señales, basta una: solape de tokens (Jaccard ≥ 0.7, sin conectores y con el plural recortado) o errata (mismo número de palabras y ≤ 1 carácter de diferencia en total, alineadas por posición). **No se usa distancia de edición sobre la cadena completa**: sobre nombres largos es engañosa — "Enfriamiento · Estiramientos (PUSH)" y "... (PULL)" se parecen 94% carácter a carácter y son ejercicios distintos. El usuario confirma o rechaza cada par en la tarjeta "Posibles duplicados" de Workouts.
+
 ## Datos de entrenamiento (`WORKOUTS`, clave `mt_workouts`)
-Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
-`lastPerf(name)`, `exercisePR(name)` y `allLoggedExercises()` en `app.js` agregan por `normName(exName)`, así que **dos nombres distintos del mismo ejercicio parten el historial**.
+Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,exId,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
+Cada serie lleva **`exId`** (el ejercicio del catálogo) y **conserva `exName`**: el texto tal como se registró. `exName` **no se borra nunca** — es respaldo para resolver series heredadas y hace el JSON legible a ojo. Se agrega por `exId`, así que dos grafías del mismo ejercicio ya **no** parten el historial.
 El entreno en curso se persiste aparte en `mt_activeWorkout` (permite reanudar, reiniciar, finalizar o descartar).
+Al registrar una serie, el reproductor compara contra el PR guardado **y** contra lo mejor de la sesión en curso; si lo supera, muestra "¡Nuevo record!" (`.pl-pr`) sin interrumpir nada, y lo resume al terminar.
 
 ## Reglas / convenciones
 - **SIN EMOJIS** en la UI (decisión de diseño). Usar los íconos SVG de `ICONS` en `config.js`.
+- **Selección de texto apagada por defecto.** En el PWA instalado, el long-press de iOS abre el menú Copiar/Traducir y pelea con el mantener-presionado que reordena Hoy. `body` lleva `-webkit-touch-callout:none` + `-webkit-user-select:none` (hacen falta los prefijos `-webkit-`; `user-select` a secas no basta en iOS). Se reactiva solo en `input`, `textarea`, `.reva` y **`.sel`**: si agregas texto que el usuario deba poder copiar (una nota, una bitácora), ponle la clase `.sel`.
 - **La semilla (`DEFAULT_CFG`) viene VACÍA a propósito.** El repo es público: no debe contener metas, hábitos, compromisos ni comidas de nadie. Los datos reales llegan al iniciar sesión o por importación JSON. No volver a meter datos personales ahí.
 - Todo es configurable por el usuario desde Ajustes; los datos "semilla" solo aplican la primera vez.
 - Tres importadores JSON, todos con el mismo patrón: **plan** (metas/hábitos/compromisos/métricas), **comidas** y **rutinas**.
@@ -113,6 +130,7 @@ No hay suite de tests. Para checar JS: `node --check js/<archivo>.js` (o `npm ru
 Dos detalles del harness: el stub de elemento necesita `getContext()` para los `<canvas>`, y como `eval` en modo suelto deja `let`/`const` en su propio ámbito, hay que cerrar el `eval` con `;Object.assign(global,{CFG,LOG,...})` para poder inspeccionar el estado desde las pruebas.
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
+Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación

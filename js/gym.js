@@ -56,9 +56,13 @@ function openExercise(i) {
     <button class="btn p" onclick="saveExercise(${i})">Guardar ejercicio</button><button class="btn g" onclick="renderRoutineEditor()">Cancelar</button>`);
 }
 function saveExercise(i) {
+  /* Todo nombre pasa por el catálogo: si ya existe (o es un alias), se reusa
+     su id en vez de crear un ejercicio nuevo. */
+  const cat = findOrCreateExercise(document.getElementById("xName").value);
   const ex = {
     id: i < 0 ? uid("e") : (_RT.exercises[i].id || uid("e")),
-    name: document.getElementById("xName").value.trim() || "Ejercicio",
+    exId: cat.id,
+    name: cat.name,
     sets: Math.max(1, parseInt(document.getElementById("xSets").value) || 1),
     reps: document.getElementById("xReps").value.trim() || "-",
     rest: Math.max(0, parseInt(document.getElementById("xRest").value) || 0),
@@ -66,6 +70,7 @@ function saveExercise(i) {
     note: document.getElementById("xNote").value.trim()
   };
   if (i < 0) _RT.exercises.push(ex); else _RT.exercises[i] = ex;
+  saveCfg();   // el catálogo pudo crecer
   renderRoutineEditor();
 }
 function saveRoutine() {
@@ -88,11 +93,17 @@ function normalizeRoutine(o) {
   return {
     id: uid("rt"), name: (o.name || "Rutina importada").toString(),
     days: Array.isArray(o.days) ? o.days.filter(d => WEEKDAYS.includes(d)) : [],
-    exercises: o.exercises.map(e => ({
-      id: uid("e"), name: (e.name || "Ejercicio").toString(),
-      sets: Math.max(1, parseInt(e.sets) || 1), reps: (e.reps != null ? e.reps : "-").toString(),
-      rest: Math.max(0, parseInt(e.rest) || 0), weight: (e.weight || "").toString(), note: (e.note || "").toString()
-    }))
+    /* Cada nombre importado se resuelve contra el catálogo (nombre canónico
+       y alias, sin acentos ni mayúsculas ni espacios de más). Reimportar la
+       misma rutina con otra grafía reusa el id: el historial no se parte. */
+    exercises: o.exercises.map(e => {
+      const cat = findOrCreateExercise((e.name || "Ejercicio").toString());
+      return {
+        id: uid("e"), exId: cat.id, name: cat.name,
+        sets: Math.max(1, parseInt(e.sets) || 1), reps: (e.reps != null ? e.reps : "-").toString(),
+        rest: Math.max(0, parseInt(e.rest) || 0), weight: (e.weight || "").toString(), note: (e.note || "").toString()
+      };
+    })
   };
 }
 function importJSON() {
@@ -122,7 +133,7 @@ function getActiveWorkout() {
 }
 function savePlayerState() {
   if (!PLAYER) return;
-  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx }));
+  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx, prs: PLAYER.prs || [] }));
 }
 function clearActive() { store.set("mt_activeWorkout", ""); }
 
@@ -134,13 +145,13 @@ function startWorkout(rid) {
 function beginWorkout(rid) {
   const r = CFG.routines.find(x => x.id === rid);
   if (!r || !r.exercises.length) { openRoutineEditor(rid); return; }
-  PLAYER = { r, ei: 0, si: 1, phase: "set", remaining: 0, timer: null, start: Date.now(), elapsedBase: 0, wake: null, log: [] };
+  PLAYER = { r, ei: 0, si: 1, phase: "set", remaining: 0, timer: null, start: Date.now(), elapsedBase: 0, wake: null, log: [], prs: [], pr: null };
   requestWake(); renderPlayer();
 }
 function resumeWorkout() {
   const a = getActiveWorkout(); if (!a) return render();
   const r = CFG.routines.find(x => x.id === a.rid); if (!r) { clearActive(); return render(); }
-  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx };
+  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx, prs: a.prs || [], pr: null };
   // Si estaba descansando: continúa el conteo real; si ya venció mientras no estabas, suena la alarma.
   if (PLAYER.phase === "rest" || PLAYER.phase === "alarm") {
     if (PLAYER.restEnd && restLeft() > 0) { PLAYER.phase = "rest"; PLAYER.timer = setInterval(tick, 500); }
@@ -184,7 +195,7 @@ function finalizeActive() {
   const log = a.log || [];
   if (!log.length) { discardActive(); return; } // nada registrado -> como descartar
   const vol = log.reduce((acc, s) => { const w = parseFloat(s.weight), rp = parseInt(s.reps); return acc + (isNaN(w) || isNaN(rp) ? 0 : w * rp); }, 0);
-  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: a.rid, name: r ? r.name : "Entreno", duration: a.elapsedBase || 0, volume: vol, unit: weightUnit(), sets: log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
+  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: a.rid, name: r ? r.name : "Entreno", duration: a.elapsedBase || 0, volume: vol, unit: weightUnit(), sets: log.map(s => ({ exName: s.exName, exId: s.exId || null, reps: s.reps, weight: s.weight })) });
   saveWorkouts();
   const l = day(today()); const gh = CFG.habits.find(h => h.id === "gym") || CFG.habits.find(h => /gym|entren/i.test(h.name)); if (gh) l.habits[gh.id] = true; saveLog();
   clearActive(); closeModal(); render();
@@ -243,20 +254,54 @@ function stopAlarm() {
 function dismissAlarm() {
   stopAlarm();
   const P = PLAYER; if (!P) return;
-  P.phase = "set"; P.restEnd = null; renderPlayer();
+  P.phase = "set"; P.restEnd = null; P.pr = null; renderPlayer();
 }
 
 /* ---------- Registro de series ---------- */
-function prefillFor(exName) {
-  for (let i = PLAYER.log.length - 1; i >= 0; i--) if (normName(PLAYER.log[i].exName) === normName(exName)) return { weight: PLAYER.log[i].weight, reps: PLAYER.log[i].reps };
-  const lp = lastPerf(exName); if (lp) return { weight: lp.weight, reps: lp.reps };
+/* El id del ejercicio que se está haciendo. Una rutina vieja puede no
+   traerlo todavía: se resuelve (o se crea) por nombre. */
+function curExId(ex) {
+  if (ex.exId && exById(ex.exId)) return ex.exId;
+  const cat = findOrCreateExercise(ex.name);
+  ex.exId = cat.id; saveCfg();
+  return cat.id;
+}
+function prefillFor(ex) {
+  const id = curExId(ex);
+  for (let i = PLAYER.log.length - 1; i >= 0; i--) if (PLAYER.log[i].exId === id) return { weight: PLAYER.log[i].weight, reps: PLAYER.log[i].reps };
+  const lp = lastPerf(id); if (lp) return { weight: lp.weight, reps: lp.reps };
   return { weight: "", reps: "" };
+}
+/* Mejor peso de ESTE ejercicio en la sesión en curso (aún sin guardar). */
+function sessionBest(id) {
+  let b = null;
+  PLAYER.log.forEach(s => { if (s.exId !== id) return; const v = parseFloat(s.weight); if (!isNaN(v) && (b === null || v > b)) b = v; });
+  return b;
 }
 function logCurrentSet() {
   const P = PLAYER, ex = P.r.exercises[P.ei];
+  const id = curExId(ex);
   const w = document.getElementById("plW"), r = document.getElementById("plR");
-  P.log.push({ exName: ex.name, set: P.si, weight: w ? w.value.trim() : "", reps: r ? r.value.trim() : "", unit: weightUnit() });
+  const weight = w ? w.value.trim() : "", reps = r ? r.value.trim() : "";
+  /* ¿Récord? Se compara ANTES de anotar, contra el historial guardado y
+     contra lo ya hecho en esta misma sesión, para no celebrar dos veces
+     el mismo peso. */
+  const wt = parseFloat(weight);
+  const stored = exercisePR(id), sb = sessionBest(id);
+  const prev = Math.max(stored ? parseFloat(stored.weight) : -Infinity, sb === null ? -Infinity : sb);
+  P.pr = null;
+  if (!isNaN(wt) && wt > 0 && wt > prev) {
+    P.pr = { name: exName(id, ex.name), weight: weight, reps: reps, unit: weightUnit(), previo: isFinite(prev) ? prev : null };
+    P.prs = (P.prs || []).concat([P.pr]);
+  }
+  P.log.push({ exName: ex.name, exId: id, set: P.si, weight: weight, reps: reps, unit: weightUnit() });
   P.lastIdx = P.log.length - 1;
+}
+/* Banner de récord: claro pero sin bloquear nada. */
+function prBanner(P) {
+  if (!P.pr) return "";
+  return `<div class="pl-pr">${icon("trophy")}<div><b>¡Nuevo record!</b>
+    <span>${esc(P.pr.name)} · ${esc(P.pr.weight)} ${esc(P.pr.unit)}${P.pr.reps ? " × " + esc(P.pr.reps) : ""}${P.pr.previo !== null ? " · antes " + P.pr.previo + " " + esc(P.pr.unit) : ""}</span></div></div>`;
 }
 /* Editar la serie recién registrada mientras corre el descanso */
 function editLoggedSet(which, val) {
@@ -270,9 +315,9 @@ function renderPlayer() {
   let body = "";
   const U = weightUnit();
   if (P.phase === "set") {
-    const last = P.si >= ex.sets, pf = prefillFor(ex.name), lp = lastPerf(ex.name);
+    const last = P.si >= ex.sets, pf = prefillFor(ex), lp = lastPerf(curExId(ex));
     body = `<div class="pl-mid">
-      <div class="pl-ex">${esc(ex.name)}</div>
+      <div class="pl-ex">${esc(exName(curExId(ex), ex.name))}</div>
       <div class="pl-set">Serie ${P.si} de ${ex.sets}</div>
       <div class="pl-reps">objetivo: ${esc(ex.reps)} reps${ex.weight ? " · " + esc(ex.weight) : ""}</div>
       ${ex.note ? `<div class="pl-note">${esc(ex.note)}</div>` : ""}
@@ -286,7 +331,7 @@ function renderPlayer() {
     </div>`;
   } else if (P.phase === "rest") {
     const s = P.log[P.lastIdx] || { weight: "", reps: "" };
-    body = `<div class="pl-mid"><div class="pl-restlbl">Descanso</div><div class="pl-timer" id="ptime">${fmtTime(restLeft())}</div>
+    body = `<div class="pl-mid">${prBanner(P)}<div class="pl-restlbl">Descanso</div><div class="pl-timer" id="ptime">${fmtTime(restLeft())}</div>
       <div class="pl-next">Sigue: Serie ${P.si} de ${ex.sets} · ${esc(ex.name)}</div>
       <div class="pl-logrest"><div class="pl-logtitle">Serie anterior · puedes ajustarla</div>
         <div class="pl-log"><div><label>Peso (${U})</label><input inputmode="decimal" value="${esc(s.weight)}" placeholder="—" onchange="editLoggedSet('weight',this.value)"></div>
@@ -299,13 +344,16 @@ function renderPlayer() {
       <div class="pl-next big">Serie ${P.si} de ${ex.sets}</div><div class="pl-next">${esc(ex.name)}</div></div>
     <div class="pl-actions"><button class="pl-primary alarmbtn" onclick="dismissAlarm()">Detener alarma</button></div>`;
   } else if (P.phase === "transition") {
-    body = `<div class="pl-mid"><div class="pl-done">${icon("check")}</div><div class="pl-ex">Terminaste ${esc(ex.name)}</div>
+    body = `<div class="pl-mid">${prBanner(P)}<div class="pl-done">${icon("check")}</div><div class="pl-ex">Terminaste ${esc(ex.name)}</div>
       <div class="pl-next big">Sigue: ${esc(next.name)}</div><div class="pl-summary">${next.sets} series × ${esc(next.reps)} reps · descanso ${next.rest}s${next.weight ? " · " + esc(next.weight) : ""}</div></div>
     <div class="pl-actions"><button class="pl-primary" onclick="continueNext()">Continuar</button></div>`;
   } else {
     const total = P.log.length, vol = P.log.reduce((a, s) => { const w = parseFloat(s.weight), rp = parseInt(s.reps); return a + (isNaN(w) || isNaN(rp) ? 0 : w * rp); }, 0);
+    const nprs = (P.prs || []).length;
     body = `<div class="pl-mid"><div class="pl-done big">${icon("check")}</div><div class="pl-ex">¡Rutina terminada!</div>
       <div class="pl-summary">${r.exercises.length} ejercicios · ${total} series${vol ? " · " + Math.round(vol) + " kg de volumen" : ""} · ${fmtTime(elapsed())}</div>
+      ${nprs ? `<div class="pl-pr">${icon("trophy")}<div><b>${nprs === 1 ? "1 nuevo record" : nprs + " nuevos records"}</b>
+        <span>${P.prs.map(x => esc(x.name) + " " + esc(x.weight) + " " + esc(x.unit)).join(" · ")}</span></div></div>` : ""}
       <div class="pl-note">Un voto más por el cuerpo que quieres.</div></div>
     <div class="pl-actions"><button class="pl-primary" onclick="finishWorkout()">Guardar entreno</button></div>`;
   }
@@ -335,7 +383,7 @@ function addRest(s) {
   const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(restLeft());
   savePlayerState();
 }
-function skipRest() { const P = PLAYER; clearInterval(P.timer); P.timer = null; P.restEnd = null; stopAlarm(); P.phase = "set"; renderPlayer(); }
+function skipRest() { const P = PLAYER; clearInterval(P.timer); P.timer = null; P.restEnd = null; stopAlarm(); P.phase = "set"; P.pr = null; renderPlayer(); }
 /* Al volver a la app: recalcula el tiempo transcurrido en segundo plano */
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
@@ -351,11 +399,11 @@ function afterLastSet() {
   if (P.ei < P.r.exercises.length - 1) { P.phase = "transition"; renderPlayer(); }
   else { P.phase = "done"; renderPlayer(); }
 }
-function continueNext() { const P = PLAYER; P.ei++; P.si = 1; P.phase = "set"; renderPlayer(); }
+function continueNext() { const P = PLAYER; P.ei++; P.si = 1; P.phase = "set"; P.pr = null; renderPlayer(); }
 function finishWorkout() {
   const P = PLAYER;
   const vol = P.log.reduce((a, s) => { const w = parseFloat(s.weight), r = parseInt(s.reps); return a + (isNaN(w) || isNaN(r) ? 0 : w * r); }, 0);
-  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: P.r.id, name: P.r.name, duration: elapsed(), volume: vol, unit: weightUnit(), sets: P.log.map(s => ({ exName: s.exName, reps: s.reps, weight: s.weight })) });
+  WORKOUTS.push({ id: uid("w"), date: today(), activityId: "gym", type: "strength", routineId: P.r.id, name: P.r.name, duration: elapsed(), volume: vol, unit: weightUnit(), sets: P.log.map(s => ({ exName: s.exName, exId: s.exId || null, reps: s.reps, weight: s.weight })) });
   saveWorkouts();
   const l = day(today());
   const gh = CFG.habits.find(h => h.id === "gym") || CFG.habits.find(h => /gym|entren/i.test(h.name));

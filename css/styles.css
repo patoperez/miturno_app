@@ -13,6 +13,28 @@
   --nav-h:calc(69px + env(safe-area-inset-bottom));
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+
+/* ---------- Selección de texto (iOS) ----------
+   En el PWA instalado, el long-press de Safari abre el menú de selección
+   (Copiar / Traducir) y pelea con el mantener-presionado que reordena Hoy.
+   Se apaga en TODO el chrome de la app: hacen falta los prefijos -webkit-,
+   `user-select` a secas no basta en iOS. Se vuelve a encender abajo donde
+   copiar sí tiene sentido. Si agregas texto que el usuario deba poder
+   copiar, ponle la clase .sel. */
+body{
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  -moz-user-select:none;
+  user-select:none;
+}
+/* Aquí SÍ se puede seleccionar y copiar: campos de captura, la bitácora,
+   las respuestas de la revisión semanal y las notas de un entreno. */
+input, textarea, .reva, .sel, .sel *{
+  -webkit-touch-callout:default;
+  -webkit-user-select:text;
+  -moz-user-select:text;
+  user-select:text;
+}
 html,body{margin:0; padding:0;}
 /* La cadena de alto arranca en <html>: el viewport manda, no el contenido.
    overflow:hidden va aquí (raíz) para que la propagación al viewport NO salga
@@ -321,6 +343,23 @@ textarea::placeholder{color:var(--muted2);}
 .swipehint{display:flex; align-items:center; justify-content:center; gap:6px; margin:-6px 0 12px;
   font-size:12px; color:var(--muted2);}
 .swipehint .icon{width:13px; height:13px;}
+
+/* ---------- Ejercicios: duplicados y record ---------- */
+.duprow{padding:10px 6px; border-top:1px solid var(--line);}
+.duprow:first-child{border-top:none;}
+.dupnames{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; font-size:14px;}
+.dupnames b{font-weight:650;}
+.dupnames span{color:var(--muted2); font-size:12px;}
+.dupacts{display:flex; gap:8px; margin-top:8px;}
+.dupacts button{flex:1; border-radius:10px; padding:9px; font-size:12px; font-weight:700; cursor:pointer; border:1px solid var(--line);}
+.dupacts .dupok{background:var(--lectura); border-color:var(--lectura); color:#0E0F13;}
+.dupacts .dupno{background:var(--card2); color:var(--muted);}
+/* Banner de nuevo record dentro del reproductor: claro, pero no bloquea nada. */
+.pl-pr{display:flex; align-items:center; gap:10px; margin:0 0 14px; padding:10px 14px; border-radius:14px;
+  background:rgba(245,158,11,.14); border:1px solid rgba(245,158,11,.45); color:var(--lectura); text-align:left;}
+.pl-pr .icon{width:20px; height:20px; flex:none;}
+.pl-pr b{display:block; font-size:14px; font-weight:750;}
+.pl-pr span{display:block; font-size:12px; color:var(--muted); margin-top:1px;}
 
 .hoylist{display:block;}
 /* El día entra por el lado del que viene; al topar en hoy, rebota. */

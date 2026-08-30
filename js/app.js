@@ -30,6 +30,8 @@ function loadCfg() {
   c.meals.fichas.catalog = c.meals.fichas.catalog || {};
   c.meals.fichas.innegociables = c.meals.fichas.innegociables || [];
   c.routines = c.routines || [];
+  c.exercises = c.exercises || [];
+  c.exDismissed = c.exDismissed || [];
   if (!c.activities) c.activities = JSON.parse(JSON.stringify(DEFAULT_CFG.activities));
   return c;
 }
@@ -67,7 +69,7 @@ let VIEW = "hoy";
 let VDAY = today();
 let PROG = store.get("mt_prog") || "semana"; // semana | mes | bitacora
 let CALYM = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
-const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_rt: true, w_act: true, p_met: true };
+const COLLAPSE = { h_next: true, w_hist: false, w_rec: true, w_ex: true, w_rt: true, w_act: true, p_met: true };
 const DEFAULT_HOY_ORDER = ["review", "hab", "com", "gym", "meal", "metric", "task", "next", "sleep", "mood", "journal"];
 let HOY_ORDER = (() => {
   let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; }
@@ -173,30 +175,257 @@ function habitsSorted() {
   });
 }
 
-/* ---------- Analítica de workouts ---------- */
-function normName(s) { return (s || "").toLowerCase().trim(); }
-function lastPerf(name) {
-  const key = normName(name);
+/* ========================= CATÁLOGO DE EJERCICIOS =========================
+   Un ejercicio es un ID estable (`CFG.exercises[] = {id, name, aliases[]}`),
+   NO su nombre. Antes se agregaba por el texto, así que "Press de pecho" y
+   "Press pecho" partían el historial en dos y cada importación de rutina
+   podía fragmentarlo más. Ahora el nombre es solo la etiqueta: se puede
+   renombrar sin perder nada, y los nombres alternativos viven en `aliases`. */
+
+/* Clave de comparación: sin acentos, sin mayúsculas, sin puntuación y con
+   los espacios colapsados. Es lo que decide si dos textos son "el mismo
+   nombre" al resolver o al importar. */
+function exKey(s) {
+  return (s == null ? "" : String(s))
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function exById(id) { return (CFG.exercises || []).find(x => x.id === id) || null; }
+/* Resuelve un nombre contra el nombre canónico Y todos los alias. */
+function exFind(name) {
+  const k = exKey(name); if (!k) return null;
+  return (CFG.exercises || []).find(x => exKey(x.name) === k || (x.aliases || []).some(a => exKey(a) === k)) || null;
+}
+function findOrCreateExercise(name) {
+  const nm = (name == null ? "" : String(name)).trim() || "Ejercicio";
+  const hit = exFind(nm);
+  if (hit) return hit;
+  const ex = { id: uid("ex"), name: nm, aliases: [] };
+  CFG.exercises.push(ex);
+  return ex;
+}
+function addAlias(ex, name) {
+  const k = exKey(name);
+  if (!ex || !k || k === exKey(ex.name)) return;
+  ex.aliases = ex.aliases || [];
+  if (!ex.aliases.some(a => exKey(a) === k)) ex.aliases.push(String(name).trim());
+}
+/* Acepta un id del catálogo o un nombre suelto (compatibilidad con llamadas viejas). */
+function toExId(idOrName) {
+  if (!idOrName) return null;
+  if (exById(idOrName)) return idOrName;
+  const e = exFind(idOrName);
+  return e ? e.id : null;
+}
+/* El id de una serie. Las series nuevas lo traen; las heredadas se resuelven
+   por nombre para que el historial viejo siga contando. */
+function setExId(s) {
+  if (!s) return null;
+  if (s.exId) return s.exId;
+  const e = exFind(s.exName);
+  return e ? e.id : null;
+}
+function exName(id, fallback) { const e = exById(id); return e ? e.name : (fallback || "Ejercicio"); }
+
+/* ---------- Migración (idempotente, solo agrega) ----------
+   Construye el catálogo a partir de las rutinas Y de todo el historial, y
+   rellena `exId`. NUNCA borra `exName`, ni reescribe una serie, ni tira un
+   entreno: correrla dos veces no cambia nada la segunda vez. */
+function migrateExercises() {
+  CFG.exercises = CFG.exercises || [];
+  CFG.exDismissed = CFG.exDismissed || [];
+  let cfgDirty = false, wDirty = false;
+  (CFG.routines || []).forEach(r => (r.exercises || []).forEach(e => {
+    if (e.exId && exById(e.exId)) return;
+    e.exId = findOrCreateExercise(e.name).id;
+    cfgDirty = true;
+  }));
+  (WORKOUTS || []).forEach(w => (w.sets || []).forEach(s => {
+    if (s.exId && exById(s.exId)) return;
+    s.exId = findOrCreateExercise(s.exName).id;   // exName se conserva intacto
+    wDirty = true; cfgDirty = true;
+  }));
+  if (cfgDirty) saveCfg();
+  if (wDirty) saveWorkouts();
+  return { entries: CFG.exercises.length, cfgDirty, wDirty };
+}
+
+/* ---------- Analítica de workouts (agrega por exId) ---------- */
+function lastPerf(idOrName) {
+  const id = toExId(idOrName); if (!id) return null;
   for (let i = WORKOUTS.length - 1; i >= 0; i--) {
     const w = WORKOUTS[i]; if (!w.sets) continue;
-    const hit = w.sets.filter(s => normName(s.exName) === key && (s.weight || s.reps));
+    const hit = w.sets.filter(s => setExId(s) === id && (s.weight || s.reps));
     if (hit.length) { const s = hit[hit.length - 1]; return { weight: s.weight, reps: s.reps, date: w.date }; }
   }
   return null;
 }
-function exercisePR(name) {
-  const key = normName(name); let best = null;
+function exercisePR(idOrName) {
+  const id = toExId(idOrName); if (!id) return null;
+  let best = null;
   WORKOUTS.forEach(w => (w.sets || []).forEach(s => {
-    if (normName(s.exName) !== key) return;
+    if (setExId(s) !== id) return;
     const wt = parseFloat(s.weight); if (isNaN(wt)) return;
     if (!best || wt > best.weight) best = { weight: wt, reps: s.reps, date: w.date };
   }));
   return best;
 }
+/* Entradas del catálogo con al menos una serie con peso registrado. */
 function allLoggedExercises() {
-  const set = {};
-  WORKOUTS.forEach(w => (w.sets || []).forEach(s => { if (s.weight && !isNaN(parseFloat(s.weight))) set[normName(s.exName)] = s.exName; }));
-  return Object.values(set);
+  const ids = {};
+  WORKOUTS.forEach(w => (w.sets || []).forEach(s => {
+    if (!s.weight || isNaN(parseFloat(s.weight))) return;
+    const id = setExId(s); if (id) ids[id] = true;
+  }));
+  return (CFG.exercises || []).filter(e => ids[e.id]);
+}
+/* Todas las series de un ejercicio, agrupadas por sesión, más reciente primero. */
+function exSessions(id) {
+  const out = [];
+  WORKOUTS.forEach(w => {
+    const hit = (w.sets || []).filter(s => setExId(s) === id);
+    if (hit.length) out.push({ w, sets: hit });
+  });
+  return out.sort((a, b) => b.w.date.localeCompare(a.w.date));
+}
+/* Mejor peso por sesión, en orden cronológico: la línea de progresión. */
+function exProgress(id) {
+  return exSessions(id).slice().reverse().map(g => {
+    let best = null;
+    g.sets.forEach(s => { const v = parseFloat(s.weight); if (!isNaN(v) && (best === null || v > best)) best = v; });
+    return { date: g.w.date, weight: best };
+  }).filter(p => p.weight !== null);
+}
+
+/* ---------- Detección de posibles duplicados ----------
+   Deliberadamente conservadora: NUNCA fusiona sola, solo propone, y prefiere
+   callarse antes que llenar la pantalla de pares que no son. Dos señales, y
+   basta con que una dispare:
+     1. Solape de tokens (Jaccard >= 0.7) sobre las palabras normalizadas, sin
+        conectores ("de", "la", "con"...) y con el plural recortado. Atrapa
+        "Press de pecho" == "Press pecho", "Curl bíceps" == "Curl de bíceps"
+        y "Sentadilla" == "Sentadillas", incluso con las palabras en otro
+        orden.
+     2. Errata: mismo número de palabras y, alineadas una a una, a lo más UN
+        carácter de diferencia en total ("Press banca" vs "Press banka").
+
+   Lo que NO se usa: distancia de edición sobre la cadena completa. Sobre
+   nombres largos es engañosa — "Enfriamiento · Estiramientos (PUSH)" y
+   "... (PULL)" se parecen en un 94% carácter a carácter y son ejercicios
+   distintos. La señal buena ahí es la palabra que cambia, no el porcentaje:
+   por tokens dan 0.5 y quedan fuera. Mismo caso con "Remo en máquina
+   (apoyado)" vs "... pesado" y con "Activación de pierna" vs "de cadera". */
+const EX_STOP = ["de", "del", "la", "el", "los", "las", "con", "en", "a", "y", "para", "por"];
+function exTokens(name) {
+  return exKey(name).split(" ").filter(t => t && EX_STOP.indexOf(t) < 0).map(t => {
+    if (t.length > 5 && /es$/.test(t)) return t.slice(0, -2);
+    if (t.length > 4 && /s$/.test(t)) return t.slice(0, -1);
+    return t;
+  });
+}
+function jaccard(a, b) {
+  const A = a.filter((v, i) => a.indexOf(v) === i), B = b.filter((v, i) => b.indexOf(v) === i);
+  if (!A.length || !B.length) return 0;
+  const inter = A.filter(t => B.indexOf(t) >= 0).length;
+  return inter / (A.length + B.length - inter);
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = []; for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function levSim(a, b) {
+  const m = Math.max(a.length, b.length);
+  return m ? 1 - levenshtein(a, b) / m : 0;
+}
+/* Señal 2: misma cantidad de palabras y, alineadas por posición, a lo más un
+   carácter de diferencia en total. Es la errata de dedo, no el ejercicio
+   distinto: "push" vs "pull" son 2 y quedan fuera. */
+function typoClose(a, b) {
+  const A = exTokens(a), B = exTokens(b);
+  if (!A.length || A.length !== B.length) return false;
+  let d = 0;
+  for (let i = 0; i < A.length; i++) {
+    d += levenshtein(A[i], B[i]);
+    if (d > 1) return false;
+  }
+  return true;
+}
+/* Puntaje entre dos entradas: el mejor entre todas sus combinaciones de
+   nombre y alias, para que un alias también delate el duplicado. */
+function exSimilarity(a, b) {
+  const na = [a.name].concat(a.aliases || []), nb = [b.name].concat(b.aliases || []);
+  let best = 0;
+  na.forEach(x => nb.forEach(y => {
+    const j = jaccard(exTokens(x), exTokens(y));
+    let sc = 0;
+    if (j >= 0.7) sc = j;
+    else if (typoClose(x, y)) sc = Math.max(0.85, levSim(exKey(x), exKey(y)));
+    if (sc > best) best = sc;
+  }));
+  return best;
+}
+function dupPairKey(a, b) { return [a, b].sort().join("|"); }
+function dupCandidates() {
+  const ex = CFG.exercises || [], out = [], skip = CFG.exDismissed || [];
+  for (let i = 0; i < ex.length; i++) {
+    for (let j = i + 1; j < ex.length; j++) {
+      if (skip.indexOf(dupPairKey(ex[i].id, ex[j].id)) >= 0) continue;
+      const sc = exSimilarity(ex[i], ex[j]);
+      if (sc > 0) out.push({ a: ex[i], b: ex[j], score: sc });
+    }
+  }
+  return out.sort((x, y) => y.score - x.score);
+}
+
+/* ---------- Fusionar y renombrar ----------
+   Fusionar no borra historial: el nombre perdedor sobrevive como alias y
+   todas sus series y rutinas pasan al id que se queda. */
+function mergeExercises(keepId, dropId) {
+  const keep = exById(keepId), drop = exById(dropId);
+  if (!keep || !drop || keep.id === drop.id) return false;
+  addAlias(keep, drop.name);
+  (drop.aliases || []).forEach(a => addAlias(keep, a));
+  WORKOUTS.forEach(w => (w.sets || []).forEach(s => { if (s.exId === drop.id) s.exId = keep.id; }));
+  (CFG.routines || []).forEach(r => (r.exercises || []).forEach(e => { if (e.exId === drop.id) e.exId = keep.id; }));
+  CFG.exercises = CFG.exercises.filter(x => x.id !== drop.id);
+  CFG.exDismissed = (CFG.exDismissed || []).filter(k => k.indexOf(drop.id) < 0);
+  saveCfg(); saveWorkouts();
+  return true;
+}
+/* Renombrar NO toca el historial: se agrega por id, no por texto. El nombre
+   viejo queda como alias para que una importación con el nombre anterior
+   siga cayendo en el mismo ejercicio. */
+function renameExercise(id, newName, keepOld) {
+  const ex = exById(id); if (!ex) return false;
+  const nm = (newName == null ? "" : String(newName)).trim();
+  if (!nm) return false;
+  const clash = exFind(nm);
+  if (clash && clash.id !== id) return "clash";
+  /* Primero se renombra y DESPUÉS se guarda el alias: addAlias ignora un
+     nombre igual al canónico, así que hacerlo al revés perdía el viejo. */
+  const prev = ex.name;
+  ex.name = nm;
+  if (keepOld !== false) addAlias(ex, prev);
+  saveCfg();
+  return true;
+}
+function delExerciseAlias(id, alias) {
+  const ex = exById(id); if (!ex) return;
+  ex.aliases = (ex.aliases || []).filter(a => a !== alias);
+  saveCfg();
 }
 function workoutsInRange(from, to) { return WORKOUTS.filter(w => w.date >= from && w.date <= to); }
 function hasWorkout(d) { return WORKOUTS.some(w => w.date === d); }
@@ -666,7 +895,7 @@ function bitacoraList() {
     return `<div class="sec"><div class="sec-b" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <b style="text-transform:capitalize;cursor:pointer" onclick="openDay('${d}')">${fmtDate(d)}</b>
       ${l.mood ? `<span class="streak" style="background:${moodColor(l.mood)};color:#0E0F13;border:none">${l.mood}/10</span>` : ""}</div>
-      ${l.journal ? `<div style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : (rev ? "" : `<div class="empty">Sin nota</div>`)}
+      ${l.journal ? `<div class="sel" style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : (rev ? "" : `<div class="empty">Sin nota</div>`)}
       ${rev}
       <div class="sub" style="margin-top:8px;font-size:12px;color:var(--muted2)">${Math.round(pointsFor(d))} puntos${l.sleep ? " · " + l.sleep + " de sueño" : ""}</div></div></div>`;
   }).join("") : `<div class="empty" style="padding:40px">Tu bitácora aparecerá aquí conforme escribas cada día.</div>`;
@@ -746,12 +975,26 @@ function renderWorkouts() {
     return `<div class="row" onclick="openWorkoutDetail('${w.id}')"><span class="idi" style="background:${a.color}22;color:${a.color}">${icon(a.icon)}</span>
       <div class="body"><div class="name">${esc(w.name)}</div><div class="sub">${cap(fmtShort(w.date))} · ${workoutSummary(w)}</div></div><span class="chev">${icon("chevron")}</span></div>`;
   }).join("") : `<div class="empty">Aún no registras entrenamientos. ¡Inicia una rutina o registra una clase!</div>`, "clock", "var(--muted)");
+  // Posibles duplicados del catálogo (nunca se fusiona solo: aquí se confirma)
+  out += dupPrompt();
   // Records
+  const U2 = (CFG.settings && CFG.settings.unit) || "kg";
   const exs = allLoggedExercises();
-  out += sec("w_rec", "Records", String(exs.length), exs.length ? exs.map(name => {
-    const pr = exercisePR(name);
-    return `<div class="row"><span class="idi" style="background:#F59E0B22;color:#F59E0B">${icon("trophy")}</span><div class="body"><div class="name">${esc(name)}</div><div class="sub">${pr ? pr.weight + " " + ((CFG.settings && CFG.settings.unit) || "kg") + " × " + esc(pr.reps) : "—"}</div></div></div>`;
+  out += sec("w_rec", "Records", String(exs.length), exs.length ? exs.map(e => {
+    const pr = exercisePR(e.id);
+    return `<div class="row" onclick="openExerciseDetail('${e.id}')"><span class="idi" style="background:#F59E0B22;color:#F59E0B">${icon("trophy")}</span>
+      <div class="body"><div class="name">${esc(e.name)}</div><div class="sub">${pr ? pr.weight + " " + U2 + " × " + esc(pr.reps) : "—"}</div></div><span class="chev">${icon("chevron")}</span></div>`;
   }).join("") : `<div class="empty">Tus records aparecerán al registrar pesos.</div>`, "trophy", "var(--lectura)");
+  // Catálogo completo de ejercicios
+  const cat = (CFG.exercises || []).slice().sort((a, b) => a.name.localeCompare(b.name, "es"));
+  out += sec("w_ex", "Ejercicios", String(cat.length), cat.length ? cat.map(e => {
+    const pr = exercisePR(e.id), ns = exSessions(e.id).length;
+    const bits = [ns ? ns + (ns === 1 ? " sesión" : " sesiones") : "sin registros"];
+    if (pr) bits.push("PR " + pr.weight + " " + U2);
+    if ((e.aliases || []).length) bits.push((e.aliases.length === 1 ? "1 alias" : e.aliases.length + " alias"));
+    return `<div class="row" onclick="openExerciseDetail('${e.id}')"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
+      <div class="body"><div class="name">${esc(e.name)}</div><div class="sub">${bits.join(" · ")}</div></div><span class="chev">${icon("chevron")}</span></div>`;
+  }).join("") : `<div class="empty">Tu catálogo se llena solo al registrar o importar rutinas.</div>`, "list", "var(--cuerpo)");
   // Rutinas
   const list = CFG.routines.length ? CFG.routines.map(r2 => `<div class="row"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
     <div class="body" onclick="openRoutineEditor('${r2.id}')"><div class="name">${esc(r2.name)}</div><div class="sub">${r2.exercises.length} ejercicios${r2.days && r2.days.length ? " · " + r2.days.join(", ") : ""}</div></div>
@@ -764,6 +1007,117 @@ function renderWorkouts() {
     + `<button class="addbtn" onclick="openEditActivity()">${icon("plus")} Nueva actividad</button>`, "sliders", "var(--muted)");
   app.innerHTML = out;
 }
+/* ---------- Posibles duplicados ----------
+   Se propone, nunca se fusiona solo: cada par lo confirma o lo rechaza el
+   usuario. Un rechazo se guarda en CFG.exDismissed y no vuelve a salir. */
+let _dupHidden = false;
+function hideDupPrompt() { _dupHidden = true; render(); }
+function rejectDupPair(a, b) {
+  CFG.exDismissed = CFG.exDismissed || [];
+  const k = dupPairKey(a, b);
+  if (CFG.exDismissed.indexOf(k) < 0) CFG.exDismissed.push(k);
+  saveCfg(); render();
+}
+function dupPrompt() {
+  if (_dupHidden) return "";
+  const cands = dupCandidates();
+  if (!cands.length) return "";
+  const rows = cands.slice(0, 6).map(c => `<div class="duprow">
+    <div class="dupnames"><b>${esc(c.a.name)}</b><span>y</span><b>${esc(c.b.name)}</b></div>
+    <div class="dupacts">
+      <button class="dupok" onclick="openMergeChoice('${c.a.id}','${c.b.id}')">Es el mismo</button>
+      <button class="dupno" onclick="rejectDupPair('${c.a.id}','${c.b.id}')">Son distintos</button>
+    </div></div>`).join("");
+  const body = `<div class="empty" style="text-align:left;padding:2px 6px 10px">Estos ejercicios se parecen. Si son el mismo, únelos y su historial se junta. Nada se borra.</div>
+    ${rows}${cands.length > 6 ? `<div class="empty" style="padding:6px">y ${cands.length - 6} más</div>` : ""}
+    <button class="addbtn" onclick="hideDupPrompt()">Ahora no</button>`;
+  return sec("w_dup", "Posibles duplicados", String(cands.length), body, "list", "var(--lectura)");
+}
+function openMergeChoice(aId, bId) {
+  const a = exById(aId), b = exById(bId);
+  if (!a || !b) return render();
+  const na = exSessions(aId).length, nb = exSessions(bId).length;
+  sheet(`<h3>¿Cuál nombre se queda?</h3><div class="mm">El otro queda como alias y todo su historial se une. No se borra ningún entreno.</div>
+    <button class="btn p" onclick="doMerge('${aId}','${bId}')">${esc(a.name)} <span style="opacity:.6">· ${na} ${na === 1 ? "sesión" : "sesiones"}</span></button>
+    <button class="btn p" onclick="doMerge('${bId}','${aId}')">${esc(b.name)} <span style="opacity:.6">· ${nb} ${nb === 1 ? "sesión" : "sesiones"}</span></button>
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function doMerge(keepId, dropId) { mergeExercises(keepId, dropId); closeModal(); render(); }
+
+/* ---------- Detalle de un ejercicio ---------- */
+function openExerciseDetail(id) {
+  const e = exById(id); if (!e) return;
+  const U = (CFG.settings && CFG.settings.unit) || "kg";
+  const pr = exercisePR(id), lp = lastPerf(id), groups = exSessions(id), prog = exProgress(id);
+  const stats = `<div class="statrow">
+    <div class="stat"><b>${pr ? pr.weight + " " + U : "—"}</b><span>PR${pr ? " × " + esc(pr.reps) : ""}</span></div>
+    <div class="stat"><b>${groups.length}</b><span>${groups.length === 1 ? "sesión" : "sesiones"}</span></div></div>
+    ${pr ? `<div class="mm" style="margin-top:6px">Tu mejor marca fue el ${cap(fmtDate(pr.date))}.</div>` : ""}
+    ${lp ? `<div class="mm">Última vez: ${esc(lp.weight) || "—"} ${U} × ${esc(lp.reps) || "—"} · ${cap(fmtShort(lp.date))}</div>` : ""}`;
+  const chart = prog.length > 1
+    ? `<div class="lbl">Progresión</div><canvas id="exchart" width="600" height="180" style="width:100%;height:auto"></canvas>`
+    : "";
+  const hist = groups.length ? groups.map(g => `<div class="lbl">${cap(fmtDate(g.w.date))}</div>`
+    + g.sets.map((s, i) => `<div class="catrow"><span>Serie ${i + 1}</span><span class="amt">${s.weight ? esc(s.weight) + " " + (g.w.unit || U) : "—"} × ${esc(s.reps) || "—"}</span></div>`).join("")).join("")
+    : `<div class="empty">Sin series registradas todavía</div>`;
+  const alias = (e.aliases || []).length
+    ? `<div class="lbl">También conocido como</div><div class="chips" style="padding:0">${e.aliases.map(a => `<div class="chip">${esc(a)}</div>`).join("")}</div>`
+    : "";
+  sheet(`<span class="idi" style="width:44px;height:44px;background:#FF5A3C22;color:var(--cuerpo);display:flex;align-items:center;justify-content:center;border-radius:12px">${icon("dumbbell")}</span>
+    <h3 style="margin-top:8px">${esc(e.name)}</h3>
+    ${stats}${alias}${chart}
+    <div class="lbl">Historial</div>${hist}
+    <button class="btn g" onclick="openRenameExercise('${id}')">${icon("edit")} Renombrar</button>
+    <button class="btn g" onclick="openMergePick('${id}')">Unir con otro ejercicio</button>
+    <button class="btn g" onclick="closeModal()">Cerrar</button>`);
+  if (prog.length > 1) drawExProgress(prog);
+}
+/* Línea de progresión: mejor peso por sesión. Mismo lenguaje visual que las
+   chispas de métricas (escala automática entre mínimo y máximo). */
+function drawExProgress(pts) {
+  const cv = document.getElementById("exchart"); if (!cv) return;
+  const ctx = cv.getContext("2d"); if (!ctx) return;
+  const W = cv.width, H = cv.height, pad = 16;
+  ctx.clearRect(0, 0, W, H);
+  const vals = pts.map(p => p.weight);
+  let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  if (hi === lo) { hi = lo + 1; lo = lo - 1; }
+  const xs = i => pts.length > 1 ? pad + (W - 2 * pad) * (i / (pts.length - 1)) : W / 2;
+  const ys = v => H - pad - (H - 2 * pad) * ((v - lo) / (hi - lo));
+  ctx.strokeStyle = "#262A35"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, H - pad); ctx.lineTo(W - pad, H - pad); ctx.stroke();
+  ctx.strokeStyle = "#FF5A3C"; ctx.lineWidth = 3; ctx.lineJoin = "round";
+  ctx.beginPath();
+  pts.forEach((p, i) => { const x = xs(i), y = ys(p.weight); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  ctx.fillStyle = "#FF5A3C";
+  pts.forEach((p, i) => { ctx.beginPath(); ctx.arc(xs(i), ys(p.weight), 3.5, 0, 7); ctx.fill(); });
+}
+function openRenameExercise(id) {
+  const e = exById(id); if (!e) return;
+  sheet(`<h3>Renombrar ejercicio</h3><div class="mm">El historial no se toca: se agrega por id, no por nombre. El nombre anterior queda como alias.</div>
+    <div class="lbl">Nombre</div><input id="exNm" class="field" value="${esc(e.name)}">
+    <div id="exMsg" style="font-size:13px;margin-top:8px"></div>
+    <button class="btn p" onclick="saveRenameExercise('${id}')">Guardar</button>
+    <button class="btn g" onclick="openExerciseDetail('${id}')">Cancelar</button>`);
+}
+function saveRenameExercise(id) {
+  const v = document.getElementById("exNm").value;
+  const res = renameExercise(id, v);
+  const msg = document.getElementById("exMsg");
+  if (res === "clash") { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Ya existe otro ejercicio con ese nombre. Únelos en vez de repetirlo.</span>`; return; }
+  if (!res) { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Ponle un nombre.</span>`; return; }
+  openExerciseDetail(id); render();
+}
+function openMergePick(id) {
+  const e = exById(id); if (!e) return;
+  const others = (CFG.exercises || []).filter(x => x.id !== id).sort((a, b) => a.name.localeCompare(b.name, "es"));
+  sheet(`<h3>Unir "${esc(e.name)}" con...</h3><div class="mm">Elige el otro ejercicio. Después decides cuál nombre se queda.</div>
+    ${others.length ? others.map(o => `<div class="row" onclick="openMergeChoice('${id}','${o.id}')"><span class="idi" style="background:#FF5A3C22;color:var(--cuerpo)">${icon("dumbbell")}</span>
+      <div class="body"><div class="name">${esc(o.name)}</div><div class="sub">${exSessions(o.id).length} sesiones</div></div></div>`).join("") : `<div class="empty">No hay otro ejercicio en el catálogo</div>`}
+    <button class="btn g" onclick="openExerciseDetail('${id}')">Cancelar</button>`);
+}
+
 function weeklyStrip() {
   const wd = weekDates(), names = ["L","M","M","J","V","S","D"];
   return `<div class="wstrip">${wd.map((d, i) => {
@@ -781,12 +1135,18 @@ function openWorkoutDetail(id) {
   const a = getAct(w.activityId);
   let body;
   if (w.sets && w.sets.length) {
-    const byEx = {};
-    w.sets.forEach(s => { (byEx[s.exName] = byEx[s.exName] || []).push(s); });
+    /* Se agrupa por exId: si esa sesión registró dos grafías del mismo
+       ejercicio, ahora salen juntas y con el nombre canónico. */
+    const byEx = {}, order = [];
+    w.sets.forEach(s => {
+      const k = setExId(s) || exKey(s.exName) || "?";
+      if (!byEx[k]) { byEx[k] = { name: exName(setExId(s), s.exName), sets: [] }; order.push(k); }
+      byEx[k].sets.push(s);
+    });
     const wu = w.unit || (CFG.settings && CFG.settings.unit) || "kg";
-    body = Object.keys(byEx).map(nm => `<div class="lbl">${esc(nm)}</div>` + byEx[nm].map((s, i) => `<div class="catrow"><span>Serie ${i + 1}</span><span class="amt">${s.weight ? s.weight + " " + wu : "—"} × ${esc(s.reps) || "—"}</span></div>`).join("")).join("");
+    body = order.map(k => `<div class="lbl">${esc(byEx[k].name)}</div>` + byEx[k].sets.map((s, i) => `<div class="catrow"><span>Serie ${i + 1}</span><span class="amt">${s.weight ? s.weight + " " + wu : "—"} × ${esc(s.reps) || "—"}</span></div>`).join("")).join("");
   } else {
-    body = `<div class="catrow"><span>Duración</span><span class="amt">${w.duration || 0} min</span></div>${w.intensity ? `<div class="catrow"><span>Intensidad</span><span class="amt">${w.intensity}/10</span></div>` : ""}${w.notes ? `<div class="lbl">Notas</div><div style="font-size:14px;color:var(--muted)">${esc(w.notes)}</div>` : ""}`;
+    body = `<div class="catrow"><span>Duración</span><span class="amt">${w.duration || 0} min</span></div>${w.intensity ? `<div class="catrow"><span>Intensidad</span><span class="amt">${w.intensity}/10</span></div>` : ""}${w.notes ? `<div class="lbl">Notas</div><div class="sel" style="font-size:14px;color:var(--muted)">${esc(w.notes)}</div>` : ""}`;
   }
   sheet(`<span class="idi" style="width:44px;height:44px;background:${a.color}22;color:${a.color};display:flex;align-items:center;justify-content:center;border-radius:12px">${icon(a.icon)}</span>
     <h3 style="margin-top:8px">${esc(w.name)}</h3><div class="mm">${cap(fmtDate(w.date))} · ${workoutSummary(w)}</div>
@@ -1371,6 +1731,7 @@ function applyBackup(text) {
 }
 function refreshState() {
   CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts();
+  migrateExercises();   // un respaldo viejo puede venir sin catálogo
   PROG = store.get("mt_prog") || "semana";
   HOY_ORDER = (() => { let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; } if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice(); o = o.filter(k => DEFAULT_HOY_ORDER.includes(k)); DEFAULT_HOY_ORDER.forEach(k => { if (!o.includes(k)) o.push(k); }); return o; })();
   buildNav(); render();
