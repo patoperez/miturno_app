@@ -233,6 +233,18 @@ textarea::placeholder{color:var(--muted2);}
 .mnav{display:flex; align-items:center; justify-content:space-between; padding:2px 4px 10px;}
 .mnav b{font-size:15px; font-weight:700;}
 .mnav button{width:34px; height:34px; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+
+/* ---------- Navegador de día (Hoy) ----------
+   Reusa .mnav. Cuando NO estás parado en hoy se tiñe de ámbar: es la única
+   señal que impide registrar en el día equivocado, así que tiene que verse. */
+.daynav{margin:-4px 0 14px; padding:6px 8px; border:1px solid var(--line); border-radius:14px; background:var(--card);}
+.daynav b{font-size:14px; text-transform:capitalize;}
+.daynav .dn-r{display:flex; align-items:center; gap:6px;}
+.daynav button[disabled]{opacity:.28; cursor:default;}
+.daynav .dn-today{width:auto; padding:0 12px; font-size:12px; font-weight:700;}
+.daynav.past{background:rgba(245,158,11,.10); border-color:rgba(245,158,11,.42);}
+.daynav.past b{color:var(--lectura);}
+.daynav.past .dn-today{background:var(--lectura); border-color:var(--lectura); color:#0E0F13;}
 .mday{cursor:pointer;}
 .mday .dots{display:flex; gap:3px; margin-top:2px; height:6px;}
 .cdot{width:5px; height:5px; border-radius:50%; display:inline-block;}
