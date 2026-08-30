@@ -234,17 +234,6 @@ textarea::placeholder{color:var(--muted2);}
 .mnav b{font-size:15px; font-weight:700;}
 .mnav button{width:34px; height:34px; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;}
 
-/* ---------- Navegador de día (Hoy) ----------
-   Reusa .mnav. Cuando NO estás parado en hoy se tiñe de ámbar: es la única
-   señal que impide registrar en el día equivocado, así que tiene que verse. */
-.daynav{margin:-4px 0 14px; padding:6px 8px; border:1px solid var(--line); border-radius:14px; background:var(--card);}
-.daynav b{font-size:14px; text-transform:capitalize;}
-.daynav .dn-r{display:flex; align-items:center; gap:6px;}
-.daynav button[disabled]{opacity:.28; cursor:default;}
-.daynav .dn-today{width:auto; padding:0 12px; font-size:12px; font-weight:700;}
-.daynav.past{background:rgba(245,158,11,.10); border-color:rgba(245,158,11,.42);}
-.daynav.past b{color:var(--lectura);}
-.daynav.past .dn-today{background:var(--lectura); border-color:var(--lectura); color:#0E0F13;}
 .mday{cursor:pointer;}
 .mday .dots{display:flex; gap:3px; margin-top:2px; height:6px;}
 .cdot{width:5px; height:5px; border-radius:50%; display:inline-block;}
@@ -320,7 +309,30 @@ textarea::placeholder{color:var(--muted2);}
 .unitseg{margin-bottom:0; width:130px; flex:none;}
 
 /* ---------- Reordenar secciones de Hoy ---------- */
+/* ---------- Hoy: día visto y cambio de día ----------
+   La fecha aparece UNA sola vez (en el header). Fuera de hoy se tiñe de
+   ámbar y sale el chip "Hoy": es la única señal de que no estás en hoy y la
+   única salida de vuelta, así que no quitarlas. */
+.hd .date.past{color:var(--lectura);}
+.hd .todaychip{display:inline-flex; align-items:center; gap:4px; margin-top:6px; padding:4px 10px;
+  border-radius:999px; background:var(--lectura); border:1px solid var(--lectura); color:#0E0F13;
+  font-size:12px; font-weight:700; line-height:1;}
+.hd .todaychip .icon{width:13px; height:13px;}
+.swipehint{display:flex; align-items:center; justify-content:center; gap:6px; margin:-6px 0 12px;
+  font-size:12px; color:var(--muted2);}
+.swipehint .icon{width:13px; height:13px;}
+
 .hoylist{display:block;}
+/* El día entra por el lado del que viene; al topar en hoy, rebota. */
+@keyframes hoy-prev{from{opacity:.4; transform:translateX(-26px);} to{opacity:1; transform:none;}}
+@keyframes hoy-next{from{opacity:.4; transform:translateX(26px);} to{opacity:1; transform:none;}}
+@keyframes hoy-bounce{0%{transform:none;} 35%{transform:translateX(-14px);} 100%{transform:none;}}
+.hoylist.slide-prev{animation:hoy-prev .22s ease-out;}
+.hoylist.slide-next{animation:hoy-next .22s ease-out;}
+.hoylist.bounce-end{animation:hoy-bounce .28s ease-out;}
+@media (prefers-reduced-motion: reduce){
+  .hoylist.slide-prev, .hoylist.slide-next, .hoylist.bounce-end{animation:none;}
+}
 .dsec{touch-action:pan-y;}
 .dsec.dragging{opacity:.97;}
 .dsec.dragging .sec{border-color:var(--cuerpo); box-shadow:0 10px 30px rgba(0,0,0,.55); transform:scale(1.015);}

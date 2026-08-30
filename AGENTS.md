@@ -13,7 +13,7 @@ App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, com
   2. `js/config.js` — semilla de datos + constantes (`SUPABASE_URL`, `SUPABASE_KEY`, `VAPID_PUBLIC`, `ICONS`, `PALETTE`, `DEFAULT_CFG`).
   3. `js/app.js` — núcleo: estado, `render()`, todas las vistas (Hoy, Progreso, Workouts, Metas, Ajustes), modales, persistencia.
   4. `js/gym.js` — rutinas + reproductor de entrenamiento (registro de series, reanudar/finalizar).
-  5. `js/reorder.js` — arrastrar para reordenar en Hoy + **init de la app** (`buildNav()`, `render()`, registro del service worker). Se carga al final para que todo esté definido.
+  5. `js/reorder.js` — **todos los gestos de Hoy**: arrastrar para reordenar secciones y deslizar horizontalmente para cambiar de día (`initSwipeHoy()`) + **init de la app** (`buildNav()`, `render()`, registro del service worker). Se carga al final para que todo esté definido.
   6. `js/sync.js` — Supabase (login correo+contraseña, sync local-first) + notificaciones Web Push.
 - `css/styles.css` — estilos. Tema oscuro con variables CSS (`--bg`, `--cuerpo`, etc.).
 - `sw.js` — service worker. **Red primero** para archivos propios (siempre lo último con internet), **caché primero** para CDN externos, y caché como respaldo offline. Tiene `const CACHE = "mi-turno-vN"`. También maneja `push` y `notificationclick`.
@@ -45,8 +45,9 @@ El entreno en curso se persiste aparte en `mt_activeWorkout` (permite reanudar, 
 - Tres importadores JSON, todos con el mismo patrón: **plan** (metas/hábitos/compromisos/métricas), **comidas** y **rutinas**.
 - Reusar el lenguaje visual existente (`.row`, `.sec`, `.sheet`, `.field`, `.addbtn`, `.chip`, `.streak`, `.dotc`) antes de inventar clases nuevas.
 - UI en español.
-- **Local-first:** los datos viven en `localStorage` bajo claves `mt_*` (`mt_cfg`, `mt_log`, `mt_tasks`, `mt_workouts`, `mt_prog`, `mt_hoyOrder`, `mt_todayRoutine`, `mt_activeWorkout`, `mt_updated`). Las fotos de metas viven en **IndexedDB** (db `miturno`, store `photos`), NO en localStorage. La nube (Supabase, tabla `app_state`) sincroniza el blob de `localStorage` con last-write-wins.
-- Historial inmutable **ante cambios de config**: los días pasados se "congelan" (`LOG[d].frozen/pts/max`), así que agregar o quitar hábitos no reescribe el pasado. Pero editar un día a propósito **sí** mueve su puntaje: toda mutación de un día (`toggleHabit`, `toggleCommit`, `toggleMenu`, `setFicha`, `toggleInneg`, guardar/quitar métrica, `setSleep`, `setMood`, `setJournal`) llama a `recalcDay(d)`, que recalcula `pts` con `rawPoints(d)` y refresca `max`. `rawPoints(d)` es la **única** definición de la fórmula (hábitos + compromisos + `mealScore`) y la comparte con `pointsFor`, para que congelado y no congelado nunca diverjan. En un día no congelado `recalcDay` no hace nada: ahí `pointsFor` ya calcula en vivo.
+- **Local-first:** los datos viven en `localStorage` bajo claves `mt_*` (`mt_cfg`, `mt_log`, `mt_tasks`, `mt_workouts`, `mt_prog`, `mt_hoyOrder`, `mt_todayRoutine`, `mt_activeWorkout`, `mt_updated`, `mt_swipeHint`). Las fotos de metas viven en **IndexedDB** (db `miturno`, store `photos`), NO en localStorage. La nube (Supabase, tabla `app_state`) sincroniza el blob de `localStorage` con last-write-wins.
+- Historial inmutable **ante cambios de config**: los días pasados se "congelan" (`LOG[d].frozen/pts/max`), así que agregar o quitar hábitos no reescribe el pasado. Pero editar un día a propósito **sí** mueve su puntaje: toda mutación de un día (`toggleHabit`, `toggleCommit`, `toggleMenu`, `setFicha`, `toggleInneg`, guardar/quitar métrica, `setSleep`, `setMood`, `setJournal`) llama a `recalcDay(d)`, que recalcula **solo `pts`** con `rawPoints(d)`. `rawPoints(d)` es la **única** definición de la fórmula (hábitos + compromisos + `mealScore`) y la comparte con `pointsFor`, para que congelado y no congelado nunca diverjan. En un día no congelado `recalcDay` no hace nada: ahí `pointsFor` ya calcula en vivo.
+- **`max` NUNCA encoge.** `max` es el denominador que regía **ese** día, no el de hoy. `recalcDay` hace `l.max = Math.max(l.max || maxPts(), l.pts)`: solo puede crecer, y nunca queda por debajo de los puntos del propio día. Si se pisara con `maxPts()`, borrar hábitos encogería el denominador mientras las marcas viejas siguen en `LOG[d].habits`, y el día pasaría a leerse 3/2 = **150%**. Como red extra, `maxFor(d)` devuelve al menos `pointsFor(d)`, así **ninguna vista puede pintar más de 100%** ni siquiera con historiales que ya quedaron torcidos.
 
 ## IMPORTANTE — caché del service worker
 La estrategia es **red primero** para los archivos propios, así que con internet la app instalada suele traer lo último al abrir. Aun así, **siempre incrementa `const CACHE = "mi-turno-vN"` al siguiente número** en cualquier cambio de HTML/CSS/JS: es lo que invalida la caché vieja, refresca la lista de precache y garantiza que el dispositivo no siga sirviendo una versión anterior en modo offline. Si el iPhone sigue mostrando algo viejo: cerrar por completo y reabrir; si persiste, quitar de la pantalla de inicio y volver a agregar (limpia el caché del SW).
@@ -111,17 +112,27 @@ No hay suite de tests. Para checar JS: `node --check js/<archivo>.js` (o `npm ru
 
 Dos detalles del harness: el stub de elemento necesita `getContext()` para los `<canvas>`, y como `eval` en modo suelto deja `let`/`const` en su propio ámbito, hay que cerrar el `eval` con `;Object.assign(global,{CFG,LOG,...})` para poder inspeccionar el estado desde las pruebas.
 
-Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, y que no se pueda navegar al futuro.
+Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
+El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación
 5 pestañas: Hoy · Progreso · Workouts · Metas · Ajustes (barra inferior `#nav` / `.nav`). El cuerpo (`body`) contiene `#app` (contenido con scroll) y `#nav` (barra inferior). Modales (`.ov`) y el reproductor (`.player`) son overlays `position:fixed; inset:0` que cubren toda la pantalla.
 
 ### Hoy puede ver y corregir cualquier día pasado
-- `VDAY` es el día que se está viendo. Arranca en `today()` y **no se persiste**: abrir la app siempre te para en hoy, así que **no agrega ninguna clave `mt_*`**.
+- `VDAY` es el día que se está viendo. Arranca en `today()` y **no se persiste**: abrir la app siempre te para en hoy.
 - `renderHoy()` pinta `VDAY`, no `today()`. Helpers: `viewDay()`, `setVDay(d)`, `goDay(±1)`, `goToday()`, `editDay(d)`.
-- **Nunca se navega al futuro:** `setVDay` y `viewDay` recortan al presente, y estando en hoy el botón `›` va `disabled`.
-- El navegador (`dayNav()`) va debajo del header y reusa `.mnav` con la clase `.daynav`. Fuera de hoy se tiñe de ámbar (`.daynav.past`) y aparece el botón "Hoy" (`.dn-today`): es la única señal que evita registrar en el día equivocado, así que **no quitarla**.
-- El anillo del header usa los puntos del día **visto**: `header(title, sub, dayKey)` calcula `pointsFor(d) / maxFor(d)`.
+- **Nunca se navega al futuro:** `setVDay` y `viewDay` recortan al presente, y un deslizamiento hacia el futuro estando en hoy solo rebota (`bounceHoy()`).
+- **La fecha aparece UNA sola vez**, en el header. No hay barra de navegación con flechas: se quitó a propósito por redundante. Si agregas otro lugar donde se lea la fecha en Hoy, estás repitiendo lo que ya se quitó.
+- **El día se cambia deslizando** sobre el contenido de Hoy. El gesto vive en `initSwipeHoy()` (`js/reorder.js`, junto al resto de gestos de la pestaña) y se engancha una sola vez a `#app`, en el init.
+  - Derecha = día anterior, izquierda = día siguiente (topado en hoy).
+  - Umbrales: `SWIPE_MIN` 60px y `SWIPE_RATIO` 1.5 (`|dx| > |dy| * 1.5`), `EDGE_GUARD` 24px para no pisar el gesto "atrás" de iOS.
+  - Los listeners son **passive** y nunca hacen `preventDefault`: el scroll vertical nativo no se toca nunca.
+  - Se decide en `pointermove`, no en `pointerup`: responde de inmediato y sobrevive a un `pointercancel` del navegador.
+  - **Convivencia con el reordenamiento:** si hay un arrastre en curso (`window.__reorderDragging`) el swipe se ignora; y al revés, moverse más de 8px en **horizontal** cancela el mantener-presionado antes de que arranque. Ambos lados de esa regla tienen que quedarse.
+  - Se ignora si el gesto empieza en un `textarea`/`input`/`select`, si hay un modal abierto, o si `VIEW !== "hoy"`.
+- **Estar fuera de hoy tiene que notarse**, porque ya no hay barra: el greet dice "Estás editando otro día", la fecha va teñida de ámbar (`.hd .date.past`) y sale un chip **"Hoy"** (`.todaychip`) que regresa al día de hoy. Ese chip es la **única** salida de vuelta: **no quitarlo**.
+- Cambiar de día se anima (`slideHoy(n)` → `.hoylist.slide-prev/.slide-next`) y topar en hoy rebota (`bounceHoy()` → `.bounce-end`). Todo se apaga con `prefers-reduced-motion`.
+- La primera vez se pinta una pista discreta ("Desliza para ver otro día"); se apaga para siempre con el primer swipe (`swipeHintPending()` / `dismissSwipeHint()`, clave local `mt_swipeHint`, **fuera de `BACKUP_KEYS`**: es preferencia del dispositivo, no dato que sincronizar).
+- El anillo del header usa los puntos del día **visto**: `header(title, sub, dayKey)` calcula `pointsFor(d) / maxFor(d)`. Solo Hoy pasa `dayKey`, así que las demás vistas no se enteran.
 - En un día pasado, las secciones que solo tienen sentido "hoy" degradan: Workouts pasa a solo lectura (sin "Iniciar", con las filas tocables hacia `openWorkoutDetail`), "Próximas" desaparece, "Agregar tarea" arranca en el día visto y la racha de compromisos se mide al día visto (`streak(id, kind, asOf)`). La revisión semanal sigue usando `reviewDateFor`, evaluado contra `VDAY`.
 - Desde el calendario de Progreso y desde la Bitácora, el modal `openDay(d)` ofrece **"Editar este día"** (`editDay(d)`), que se para en ese día y salta a Hoy. Solo aparece para días `<= today()`.
-- El arrastre para reordenar (`js/reorder.js`) no cambia: el navegador vive **fuera** de `#hoylist`.

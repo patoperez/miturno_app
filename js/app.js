@@ -118,16 +118,29 @@ function pointsFor(d) {
 }
 /* Editar un día pasado a propósito SÍ debe mover su puntaje. El congelado
    existe para que un cambio de config no reescriba el historial, no para
-   impedir una corrección. Recalcula pts con la misma fórmula que pointsFor
-   y refresca max. En un día no congelado no hace nada: ahí pointsFor ya
-   calcula en vivo. Quien llama es responsable de saveLog(). */
+   impedir una corrección. Recalcula SOLO pts, con la misma fórmula que
+   pointsFor. En un día no congelado no hace nada: ahí pointsFor ya calcula
+   en vivo. Quien llama es responsable de saveLog().
+
+   OJO con `max`: es el denominador que regía ESE día, no el de hoy. Si se
+   pisa con maxPts() y mientras tanto se borraron hábitos, el denominador
+   encoge mientras las marcas viejas siguen en LOG[d].habits y el día pasa a
+   leerse 3/2 = 150%. Por eso max solo puede CRECER, y nunca queda por
+   debajo de los puntos del propio día. */
 function recalcDay(d) {
   const l = LOG[d];
   if (!l || !l.frozen) return;
   l.pts = rawPoints(d);
-  l.max = maxPts();
+  l.max = Math.max(l.max || maxPts(), l.pts);
 }
-function maxFor(d) { const l = LOG[d]; return (l && l.frozen) ? (l.max || maxPts()) : maxPts(); }
+/* Denominador de un día. Nunca por debajo de sus propios puntos: así ninguna
+   vista puede pintar más de 100%, ni siquiera con historiales que ya quedaron
+   torcidos por la versión anterior de recalcDay. */
+function maxFor(d) {
+  const l = LOG[d];
+  const base = (l && l.frozen) ? (l.max || maxPts()) : maxPts();
+  return Math.max(base, pointsFor(d));
+}
 /* Congela el puntaje de todos los días ya pasados usando la config actual.
    Se llama al abrir la app y antes de cualquier cambio que afecte el puntaje,
    para que el historial nunca se altere retroactivamente. */
@@ -195,9 +208,11 @@ function render() {
 }
 function header(title, sub, dayKey) {
   const d = dayKey || today();
+  /* Solo Hoy pasa dayKey, así que el modo "día pasado" no toca a las demás vistas. */
+  const past = !!dayKey && dayKey !== today();
   const pct = Math.round(pointsFor(d) / (maxFor(d) || 1) * 100) || 0;
   const c = 2 * Math.PI * 26;
-  return `<div class="hd"><div><div class="greet">${sub || ("Hola, " + esc(CFG.settings.userName))}</div><div class="date">${title}</div></div>
+  return `<div class="hd"><div><div class="greet">${sub || ("Hola, " + esc(CFG.settings.userName))}</div><div class="date${past ? " past" : ""}">${title}</div>${past ? `<button class="chip todaychip" onclick="goToday()">${icon("chevright")}Hoy</button>` : ""}</div>
     <div class="ring"><svg width="62" height="62"><circle cx="31" cy="31" r="26" stroke="var(--line)" stroke-width="6" fill="none"/>
       <circle cx="31" cy="31" r="26" stroke="var(--ok)" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg>
       <div class="val">${pct}%</div></div></div>`;
@@ -234,25 +249,41 @@ function taskRow(t) {
 function moodColor(n) { return n <= 3 ? "#EF4444" : n <= 6 ? "#F59E0B" : "#22C55E"; }
 
 /* ---------- Navegación de día ----------
-   Hoy puede mirar (y corregir) cualquier día pasado. El futuro no: no se
-   registra lo que todavía no pasó, así que ‹›  topa en hoy. */
+   El día se cambia DESLIZANDO sobre el contenido de Hoy (el gesto vive en
+   reorder.js, junto al resto de gestos de la pestaña). La fecha aparece una
+   sola vez, en el header: si no es hoy va teñida y con un chip "Hoy".
+   El futuro no se navega: no se registra lo que todavía no pasó. */
 function viewDay() { const t = today(); if (!VDAY || VDAY > t) VDAY = t; return VDAY; }
 function setVDay(d) { const t = today(); VDAY = (!d || d > t) ? t : d; }
-function goDay(n) { setVDay(addDays(viewDay(), n)); render(); }
-function goToday() { VDAY = today(); render(); }
+function goDay(n) {
+  const from = viewDay();
+  setVDay(addDays(from, n));
+  if (VDAY === from) return bounceHoy();   // topó en hoy: rebote, no redibujo
+  render(); slideHoy(n);
+}
+function goToday() { if (viewDay() === today()) return; VDAY = today(); render(); slideHoy(1); }
 /* Desde el calendario / la bitácora: pararse en ese día y saltar a Hoy. */
 function editDay(ds) { setVDay(ds); VIEW = "hoy"; closeModal(); buildNav(); render(); }
-function dayNav(d) {
-  const isT = d === today();
-  const next = isT
-    ? `<button disabled aria-label="Día siguiente">${icon("chevright")}</button>`
-    : `<button onclick="goDay(1)" aria-label="Día siguiente">${icon("chevright")}</button>`;
-  const back = isT ? "" : `<button class="dn-today" onclick="goToday()">Hoy</button>`;
-  return `<div class="mnav daynav ${isT ? "" : "past"}">
-    <button onclick="goDay(-1)" aria-label="Día anterior">${icon("chevleft")}</button>
-    <b>${cap(fmtDate(d))}</b>
-    <div class="dn-r">${back}${next}</div></div>`;
+/* Un deslizamiento corto para que el cambio de día se lea como movimiento y
+   no como un redibujo. n < 0 = día anterior: entra por la izquierda. */
+function slideHoy(n) {
+  const el = document.getElementById("hoylist"); if (!el) return;
+  const cls = n < 0 ? "slide-prev" : "slide-next";
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 260);
 }
+/* Rebote al topar en hoy: que se sienta intencional, no roto. */
+function bounceHoy() {
+  const el = document.getElementById("hoylist"); if (!el) return;
+  el.classList.remove("bounce-end");
+  void el.offsetWidth;                     // reinicia la animación
+  el.classList.add("bounce-end");
+  setTimeout(() => el.classList.remove("bounce-end"), 300);
+}
+/* Pista de "desliza", una sola vez por dispositivo. Se apaga con el primer
+   swipe. `mt_swipeHint` es preferencia local: NO va en BACKUP_KEYS. */
+function swipeHintPending() { return !store.get("mt_swipeHint"); }
+function dismissSwipeHint() { if (swipeHintPending()) store.set("mt_swipeHint", "1"); }
 
 function renderHoy() {
   const d = viewDay(), isT = d === today(), l = day(d), B = {};
@@ -288,8 +319,10 @@ function renderHoy() {
   B.journal = sec("h_journal", "Bitácora del día", l.journal ? "Escrita" : "",
     `<textarea placeholder="${isT ? "Escribe cómo te fue hoy... (opcional)" : "Escribe cómo te fue ese día... (opcional)"}" onchange="setJournal('${d}',this.value)">${esc(l.journal)}</textarea>`, "book", "var(--lectura)");
   const list = HOY_ORDER.filter(k => B[k]).map(k => `<div class="dsec" data-key="${k}">${B[k]}</div>`).join("");
+  const hint = swipeHintPending()
+    ? `<div class="swipehint">${icon("chevleft")}Desliza para ver otro día${icon("chevright")}</div>` : "";
   app.innerHTML = header(cap(fmtDate(d)), isT ? null : "Estás editando otro día", d)
-    + dayNav(d) + `<div class="hoylist" id="hoylist">${list}</div>`;
+    + hint + `<div class="hoylist" id="hoylist">${list}</div>`;
   if (typeof initReorderHoy === "function") initReorderHoy();
 }
 
