@@ -681,10 +681,13 @@ function openCatalog(cid) {
 /* ========================= MÉTRICAS =========================
    Números que registras cada día (peso, horas de estudio, pantalla...).
    No suman puntos: son medición, no cumplimiento. */
+/* Con separadores de miles: los números del negocio son grandes (45,000 MXN)
+   y sin separar no se leen de un vistazo. Los diarios (82.5 kg) no cambian. */
 function fmtNum(v, unit) {
   if (v === null || v === undefined || v === "") return "—";
   const n = Math.round(Number(v) * 100) / 100;
-  return (isNaN(n) ? "—" : String(n)) + (unit ? `<i>${esc(unit)}</i>` : "");
+  const txt = isNaN(n) ? "—" : n.toLocaleString("es-MX", { maximumFractionDigits: 2 });
+  return txt + (unit ? `<i>${esc(unit)}</i>` : "");
 }
 function metricVals(id, dates) {
   return dates.map(d => {
@@ -913,9 +916,20 @@ function drawChart(vals, todayIdx) {
 }
 function hasReview(l) { return !!(l && l.review && (l.review.worked || l.review.failed || l.review.change)); }
 function bitacoraList() {
-  const days = Object.keys(LOG).filter(d => LOG[d].journal || LOG[d].mood || hasReview(LOG[d])).sort().reverse();
+  /* Los domingos con revisión de negocio también entran, aunque ese día no
+     haya nota ni mood en LOG. */
+  const set = {};
+  Object.keys(LOG).forEach(d => { if (LOG[d].journal || LOG[d].mood || hasReview(LOG[d])) set[d] = true; });
+  Object.keys(BIZ.reviews || {}).forEach(d => { if (hasBizReview(d)) set[d] = true; });
+  const days = Object.keys(set).sort().reverse();
   return days.length ? days.map(d => {
-    const l = LOG[d], r = l.review || {};
+    const l = LOG[d] || { review: null, journal: "", mood: null, sleep: null }, r = (l.review) || {};
+    const br = BIZ.reviews[d];
+    const bizrev = hasBizReview(d) ? `<div class="revblock">
+      <div class="subhead2" style="padding-top:4px">Revisión del negocio</div>
+      ${br.moved ? `<div class="revq">Qué se movió</div><div class="reva">${esc(br.moved)}</div>` : ""}
+      ${br.stuck ? `<div class="revq">Qué está atorado</div><div class="reva">${esc(br.stuck)}</div>` : ""}
+      ${br.focus ? `<div class="revq">El foco de la semana</div><div class="reva">${esc(br.focus)}</div>` : ""}</div>` : "";
     const rev = hasReview(l) ? `<div class="revblock">
       <div class="subhead2" style="padding-top:4px">Revisión de la semana</div>
       ${r.worked ? `<div class="revq">Qué funcionó</div><div class="reva">${esc(r.worked)}</div>` : ""}
@@ -924,8 +938,8 @@ function bitacoraList() {
     return `<div class="sec"><div class="sec-b" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <b style="text-transform:capitalize;cursor:pointer" onclick="openDay('${d}')">${fmtDate(d)}</b>
       ${l.mood ? `<span class="streak" style="background:${moodColor(l.mood)};color:#0E0F13;border:none">${l.mood}/10</span>` : ""}</div>
-      ${l.journal ? `<div class="sel" style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : (rev ? "" : `<div class="empty">Sin nota</div>`)}
-      ${rev}
+      ${l.journal ? `<div class="sel" style="font-size:14px;color:var(--muted)">${esc(l.journal)}</div>` : ((rev || bizrev) ? "" : `<div class="empty">Sin nota</div>`)}
+      ${rev}${bizrev}
       <div class="sub" style="margin-top:8px;font-size:12px;color:var(--muted2)">${Math.round(pointsFor(d))} puntos${l.sleep ? " · " + l.sleep + " de sueño" : ""}</div></div></div>`;
   }).join("") : `<div class="empty" style="padding:40px">Tu bitácora aparecerá aquí conforme escribas cada día.</div>`;
 }
@@ -1723,7 +1737,7 @@ function exportMeals() {
 /* mt_biz VA AQUÍ. Sin esta línea la sección de Negocio queda fuera del
    respaldo y fuera de la sincronización con Supabase (sync.js recorre esta
    misma lista), y se perdería en silencio al cambiar de dispositivo. */
-const BACKUP_KEYS = ["mt_cfg", "mt_log", "mt_tasks", "mt_workouts", "mt_prog", "mt_hoyOrder", "mt_todayRoutine", "mt_activeWorkout", "mt_biz"];
+const BACKUP_KEYS = ["mt_cfg", "mt_log", "mt_tasks", "mt_workouts", "mt_prog", "mt_hoyOrder", "mt_todayRoutine", "mt_activeWorkout", "mt_biz", "mt_focusRun"];
 function buildBackup() {
   const data = {};
   BACKUP_KEYS.forEach(k => { const v = store.get(k); if (v != null) data[k] = v; });
@@ -1860,14 +1874,219 @@ function projectCard(p) {
     ${nextActionBlock(p)}</div>`;
 }
 
+/* ---------- Números del negocio: vista ---------- */
+function bizMetricCard(m) {
+  const pk = periodKey(m.period), v = bizMval(m.id, pk), prev = bizMval(m.id, prevPeriodKey(m.period));
+  const diff = (v !== null && prev !== null) ? v - prev : null;
+  const col = diff === null ? "var(--muted2)" : (diff > 0 ? "var(--ok)" : diff < 0 ? "var(--cuerpo)" : "var(--muted2)");
+  const tgt = Number(m.target);
+  const pct = (v !== null && tgt > 0) ? Math.max(0, Math.min(100, Math.round(v / tgt * 100))) : null;
+  return `<div class="sec"><div class="sec-b" style="padding:14px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+      <div style="min-width:0"><div class="gt">${esc(m.name)}</div>
+        <div class="bizmeta">${esc(periodLabel(m.period, pk))}${diff !== null ? ` · <b style="color:${col}">${diff > 0 ? "+" : ""}${Math.round(diff * 100) / 100}</b> vs. anterior` : ""}</div></div>
+      <span class="mval ${v !== null ? "on" : ""}">${fmtNum(v, m.unit)}</span></div>
+    ${pct !== null ? `<div class="gbar"><i style="width:${pct}%;background:var(--ingresos)"></i></div>
+      <div class="gpct"><span>${pct}% de la meta</span><span>${fmtNum(tgt, m.unit)}</span></div>` : ""}
+    <canvas class="spark" id="bsp_${m.id}" width="600" height="80" style="margin-top:10px"></canvas>
+    <div class="gymlinks"><button onclick="openBizMval('${m.id}')">${icon("plus")} Capturar</button><button onclick="openBizMetric('${m.id}')">${icon("edit")} Editar</button></div>
+  </div></div>`;
+}
+function drawBizSparks() {
+  BIZ.metrics.forEach(m => {
+    const cv = document.getElementById("bsp_" + m.id); if (!cv) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    const vals = bizMvals(m.id, m.period, 8), got = vals.filter(v => v !== null);
+    const W = cv.width, H = cv.height, pad = 10;
+    ctx.clearRect(0, 0, W, H);
+    if (!got.length) return;
+    let lo = Math.min.apply(null, got), hi = Math.max.apply(null, got);
+    if (hi === lo) { hi = lo + 1; lo = lo - 1; }
+    const xs = i => vals.length > 1 ? pad + (W - 2 * pad) * (i / (vals.length - 1)) : W / 2;
+    const ys = v => H - pad - (H - 2 * pad) * ((v - lo) / (hi - lo));
+    ctx.strokeStyle = "#10B981"; ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.beginPath();
+    let started = false;
+    vals.forEach((v, i) => { if (v === null) return; const x = xs(i), y = ys(v); if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y); });
+    ctx.stroke(); ctx.fillStyle = "#10B981";
+    vals.forEach((v, i) => { if (v === null) return; ctx.beginPath(); ctx.arc(xs(i), ys(v), 3, 0, 7); ctx.fill(); });
+  });
+}
+function numerosView() {
+  if (!BIZ.metrics.length) {
+    return `<div class="hero" style="background:linear-gradient(140deg, #10B98133, var(--card) 70%)">
+      <div class="hero-top"><span class="hero-tag" style="color:var(--ingresos);background:#10B98122">${icon("chart")} Números</span></div>
+      <div class="hero-title">Mide lo que sí mueves</div>
+      <div class="hero-sub">Ingreso del mes, clientes activos, ahorro para la visa. Cada número lleva su unidad y se lee solo: MXN y USD nunca se suman entre sí.</div>
+      <button class="hero-cta" style="background:var(--ingresos)" onclick="openBizMetric()">${icon("plus")} Nuevo número</button></div>`;
+  }
+  return BIZ.metrics.map(bizMetricCard).join("")
+    + `<button class="addbtn" onclick="openBizMetric()">${icon("plus")} Nuevo número</button>`;
+}
+/* Capturar: arranca en el periodo ACTUAL, así que normalmente son dos taps. */
+function openBizMval(id, pk) {
+  const m = bizMetric(id); if (!m) return;
+  const key = pk || periodKey(m.period), v = bizMval(id, key);
+  const ps = lastNPeriods(m.period, 4).reverse();
+  sheet(`<h3>${esc(m.name)}</h3><div class="mm">${esc(periodLabel(m.period, key))}${m.unit ? " · en " + esc(m.unit) : ""}</div>
+    <div class="lbl">Valor</div>
+    <input id="bmVal" class="field" type="number" inputmode="decimal" step="any" value="${v === null ? "" : esc(v)}" placeholder="${m.target ? "Meta: " + esc(m.target) : "Escribe el número"}">
+    <div class="lbl">Periodo</div><div class="chips" style="padding:0">${ps.map(k => `<div class="chip ${k === key ? "on" : ""}" style="${k === key ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}" onclick="openBizMval('${id}','${k}')">${esc(periodLabel(m.period, k))}</div>`).join("")}</div>
+    <button class="btn p" onclick="saveBizMval('${id}','${key}')">Guardar</button>
+    ${v !== null ? `<button class="btn g" onclick="clearBizMval('${id}','${key}')">Quitar valor</button>` : ""}
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+  const el = document.getElementById("bmVal"); if (el) { el.focus(); el.select(); }
+}
+function saveBizMval(id, pk) {
+  const raw = (document.getElementById("bmVal").value || "").trim();
+  setBizMval(id, pk, (raw === "" || isNaN(Number(raw))) ? null : Number(raw));
+  closeModal(); render();
+}
+function clearBizMval(id, pk) { setBizMval(id, pk, null); closeModal(); render(); }
+let _bmPeriod = "mes";
+function pickBmPeriod(p) { _bmPeriod = p; document.querySelectorAll("#bmPeriod button").forEach(b => b.classList.toggle("on", b.dataset.p === p)); }
+function openBizMetric(id) {
+  const editing = !!id, m = editing ? bizMetric(id) : null;
+  if (editing && !m) return render();
+  const v = m || { name: "", unit: "", target: "", period: "mes" };
+  _bmPeriod = v.period;
+  sheet(`<h3>${editing ? "Editar número" : "Nuevo número"}</h3>
+    <div class="mm">La unidad no es cosmética: es lo que evita sumar pesos con dólares.</div>
+    <div class="lbl">Nombre</div><input id="bnName" class="field" value="${esc(v.name)}" placeholder="Ingreso freelance">
+    <div class="row2"><div><div class="lbl">Unidad</div><input id="bnUnit" class="field" value="${esc(v.unit)}" placeholder="MXN, USD, clientes..."></div>
+      <div><div class="lbl">Meta (opcional)</div><input id="bnTarget" class="field" type="number" inputmode="decimal" step="any" value="${esc(v.target === 0 || v.target ? v.target : "")}"></div></div>
+    <div class="lbl">Cada cuánto</div><div class="seg small" id="bmPeriod">${BIZ_PERIODS.map(p => `<button data-p="${p}" class="${p === v.period ? "on" : ""}" onclick="pickBmPeriod('${p}')">${cap(p === "semana" ? "semanal" : "mensual")}</button>`).join("")}</div>
+    <button class="btn p" onclick="saveBizMetric('${editing ? id : ""}')">${editing ? "Guardar" : "Crear número"}</button>
+    ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelBizMetric('${id}')">Borrar número</button>` : ""}
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function saveBizMetric(id) {
+  const name = document.getElementById("bnName").value.trim(); if (!name) return;
+  const t = (document.getElementById("bnTarget").value || "").trim();
+  const data = {
+    name: name, unit: document.getElementById("bnUnit").value.trim(),
+    target: (t === "" || isNaN(Number(t))) ? "" : Number(t),
+    period: BIZ_PERIODS.indexOf(_bmPeriod) >= 0 ? _bmPeriod : "mes"
+  };
+  const m = id ? bizMetric(id) : null;
+  if (m) Object.assign(m, data);
+  else BIZ.metrics.push(Object.assign({ id: uid("bm") }, data));
+  saveBiz(); closeModal(); render();
+}
+function confirmDelBizMetric(id) {
+  const m = bizMetric(id); if (!m) return;
+  sheet(`<h3>¿Borrar "${esc(m.name)}"?</h3><div class="mm">Se borra el número y todo su histórico. Esto no se puede deshacer.</div>
+    <button class="btn p" style="background:var(--bad)" onclick="delBizMetric('${id}')">Sí, borrar</button>
+    <button class="btn g" onclick="openBizMetric('${id}')">Cancelar</button>`);
+}
+function delBizMetric(id) { BIZ.metrics = BIZ.metrics.filter(m => m.id !== id); delete BIZ.mvals[id]; saveBiz(); closeModal(); render(); }
+
+/* ---------- Ideas: vista ---------- */
+function ideaRow(i) {
+  const p = i.projectId ? bizProject(i.projectId) : null;
+  const desc = i.status === "descartada";
+  return `<div class="row" style="${desc ? "opacity:.45" : ""}" onclick="openPromoteIdea('${i.id}')">
+    <span class="dotc" style="background:${desc ? "var(--muted2)" : i.status === "guardada" ? "var(--ingresos)" : "var(--lectura)"}"></span>
+    <div class="body"><div class="name" style="${desc ? "text-decoration:line-through" : ""}">${esc(i.text)}</div>
+      <div class="sub">${esc(i.status)} · ${agoLabel(i.ts)}${p ? " · " + esc(p.name) : ""}</div></div>
+    <span class="chev">${icon("chevron")}</span></div>`;
+}
+function ideasView() {
+  const all = ideasSorted(), inbox = all.filter(i => i.status === "inbox");
+  const captura = `<div class="sec"><div class="sec-b" style="padding:14px">
+    <div class="lbl" style="margin-top:0">Captura rápida</div>
+    <input id="ideaIn" class="field" placeholder="Escribe la idea y presiona Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();captureIdea();}">
+    <button class="addbtn" onclick="captureIdea()">${icon("plus")} Capturar</button></div></div>`;
+  if (!all.length) {
+    return captura + `<div class="empty" style="padding:30px">Todo lo que se te ocurra, aquí. Sacarlo de la cabeza es lo que evita que te secuestre el día.</div>`;
+  }
+  const guardadas = all.filter(i => i.status === "guardada"), desc = all.filter(i => i.status === "descartada");
+  let out = captura;
+  out += sec("n_inbox", "Bandeja", String(inbox.length),
+    inbox.length ? inbox.map(ideaRow).join("") : `<div class="empty">Bandeja vacía. Bien.</div>`, "list", "var(--lectura)");
+  if (guardadas.length) out += sec("n_guard", "Guardadas", String(guardadas.length), guardadas.map(ideaRow).join(""), "star", "var(--ingresos)");
+  if (desc.length) out += sec("n_desc", "Descartadas", String(desc.length),
+    `<div class="empty" style="text-align:left;padding:2px 6px 8px">No se borran: si alguna vuelve a tener sentido, tócala y guárdala.</div>`
+    + desc.map(ideaRow).join(""), "trash", "var(--muted2)");
+  return out;
+}
+
+/* ---------- Foco: tarjeta del cronómetro ---------- */
+function focusCard() {
+  const r = getFocusRun();
+  const ps = BIZ.projects.filter(p => p.status === "activo");
+  if (r) {
+    const p = bizProject(r.projectId);
+    return `<div class="hero" style="background:linear-gradient(140deg, ${p.color}44, var(--card) 70%)">
+      <div class="hero-top"><span class="hero-tag" style="color:${p.color};background:${p.color}22">${icon("timer2")} Foco en curso</span></div>
+      <div class="hero-title" id="focusTime">${fmtClock(focusElapsed(r))}</div>
+      <div class="hero-sub">${esc(p.name)} · sigue corriendo aunque cierres la app</div>
+      <button class="hero-cta" style="background:${p.color}" onclick="stopFocus()">${icon("check")} Terminar y guardar</button>
+      <button class="hero-link" onclick="discardFocus()">Descartar esta sesión</button></div>`;
+  }
+  if (!ps.length) return "";
+  const hoy = focusSeconds(null, today()), sem = focusSeconds(null, weekDates()[0]);
+  return `<div class="sec"><div class="sec-b" style="padding:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+      <div><div class="gt">Sesión de foco</div><div class="bizmeta">${fmtHrs(hoy)} hoy · ${fmtHrs(sem)} esta semana</div></div>
+      <span style="color:var(--ingresos);display:flex">${icon("timer2")}</span></div>
+    <div class="chips" style="padding:0">${ps.map(p => `<div class="chip" onclick="startFocus('${p.id}')" style="border-color:${p.color}66">${icon("play")} ${esc(p.name)}</div>`).join("")}</div>
+    <button class="addbtn" onclick="openFocusManual()">${icon("plus")} Registrar a mano</button></div></div>`;
+}
+/* El intervalo SOLO repinta: el transcurrido siempre sale del reloj. */
+let _focusTimer = null;
+function focusTick() {
+  const r = getFocusRun(), el = document.getElementById("focusTime");
+  if (!r || !el) { if (_focusTimer) { clearInterval(_focusTimer); _focusTimer = null; } return; }
+  el.textContent = fmtClock(focusElapsed(r));
+}
+function armFocusTimer() {
+  if (_focusTimer) { clearInterval(_focusTimer); _focusTimer = null; }
+  if (getFocusRun() && document.getElementById("focusTime")) _focusTimer = setInterval(focusTick, 1000);
+}
+/* Al volver de segundo plano se repinta con la hora real. */
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && getFocusRun()) { focusTick(); armFocusTimer(); }
+  });
+}
+
+/* ---------- Revisión semanal del negocio ---------- */
+function bizReviewSection(d) {
+  const rd = reviewDateFor(d);
+  if (!rd) return null;
+  if (!BIZ.projects.length && !BIZ.leads.length) return null;
+  const late = rd !== d, r = bizReview(rd), f = bizWeekFacts(rd);
+  const body = `${late ? `<div class="empty" style="text-align:left;padding:2px 2px 10px">La semana que cerró ayer. Hoy es tu último día para escribirla.</div>` : ""}
+    <div class="statrow"><div class="stat"><b>${f.acciones}</b><span>acciones cerradas</span></div>
+      <div class="stat"><b>${f.leads}</b><span>leads movidos</span></div>
+      <div class="stat"><b style="color:var(--text)">${fmtHrs(f.segundos)}</b><span>de foco</span></div></div>
+    ${f.nums ? `<div class="empty" style="text-align:left;padding:6px 2px 0">${f.nums} ${f.nums === 1 ? "número capturado" : "números capturados"} este periodo.</div>` : ""}
+    <div class="lbl">¿Qué se movió de verdad?</div><textarea id="brM" placeholder="Lo que avanzó, no lo que se intentó">${esc(r.moved)}</textarea>
+    <div class="lbl">¿Qué está atorado, y por qué?</div><textarea id="brS" placeholder="La causa, no la excusa">${esc(r.stuck)}</textarea>
+    <div class="lbl">El ÚNICO foco de la próxima semana</div><textarea id="brF" placeholder="Uno. Si son tres, no es foco.">${esc(r.focus)}</textarea>
+    <button class="btn p" onclick="saveBizReview('${rd}')">Guardar revisión</button>`;
+  return sec("n_rev", "Revisión del negocio", hasBizReview(rd) ? "Escrita" : (late ? "Último día" : "Domingo"), body, "calendar", "var(--lectura)");
+}
+
 let NEGTAB = "proyectos";
 function setNegTab(t) { NEGTAB = t; render(); }
 function renderNegocio() {
   const venc = openLeadsList().filter(l => followState(l) === "vencido").length;
+  const inbox = BIZ.ideas.filter(i => i.status === "inbox").length;
+  const rev = bizReviewSection(viewDay());
   let out = header("Negocio", "Tu trabajo, con la misma disciplina")
+    + (rev || "")
     + `<div class="seg"><button class="${NEGTAB === "proyectos" ? "on" : ""}" onclick="setNegTab('proyectos')">Proyectos</button>
-      <button class="${NEGTAB === "pipeline" ? "on" : ""}" onclick="setNegTab('pipeline')">Pipeline${venc ? ` <span style="color:var(--bad)">${venc}</span>` : ""}</button></div>`;
-  app.innerHTML = out + (NEGTAB === "pipeline" ? pipelineView() : projectsView());
+      <button class="${NEGTAB === "pipeline" ? "on" : ""}" onclick="setNegTab('pipeline')">Pipeline${venc ? ` <span style="color:var(--bad)">${venc}</span>` : ""}</button>
+      <button class="${NEGTAB === "numeros" ? "on" : ""}" onclick="setNegTab('numeros')">Números</button>
+      <button class="${NEGTAB === "ideas" ? "on" : ""}" onclick="setNegTab('ideas')">Ideas${inbox ? ` <span style="color:var(--lectura)">${inbox}</span>` : ""}</button></div>`;
+  const body = NEGTAB === "pipeline" ? pipelineView()
+    : NEGTAB === "numeros" ? numerosView()
+    : NEGTAB === "ideas" ? ideasView()
+    : projectsView();
+  app.innerHTML = out + body;
+  if (NEGTAB === "numeros") drawBizSparks();
+  armFocusTimer();
 }
 function projectsView() {
   const act = activeProjects();
@@ -1881,7 +2100,7 @@ function projectsView() {
       <div class="hero-title">Empieza por un proyecto</div>
       <div class="hero-sub">Cada proyecto lleva UNA próxima acción: el paso concreto que sigue. Nada más. Eso es lo que evita quedarte viendo la pantalla sin saber por dónde entrar.</div>
       <button class="hero-cta" style="background:var(--ingresos)" onclick="openBizProject()">${icon("plus")} Nuevo proyecto</button></div>`;
-    return out;
+    return out + focusCard();
   }
 
   const sinAccion = act.filter(p => !p.nextAction).length;
@@ -1896,6 +2115,7 @@ function projectsView() {
     <div class="hero-title">${act.length} ${act.length === 1 ? "proyecto activo" : "proyectos activos"}</div>
     <div class="hero-sub">${avisos.length ? esc(avisos.join(" · ")) : "Todo con su próximo paso definido y al día."}</div></div>`;
 
+  out += focusCard();
   /* La recompensa: lo que sí cerraste. Sin esto el módulo solo reclama. */
   const dw = doneThisWeek();
   out += `<div class="statrow"><div class="stat"><b>${dw}</b><span>${dw === 1 ? "acción cerrada esta semana" : "acciones cerradas esta semana"}</span></div>
@@ -2064,6 +2284,233 @@ function leadRow(l) {
     ${isOpenStage(l.stage) ? `<button class="note-btn" aria-label="Avanzar a ${cap(nextStage(l.stage))}" onclick="event.stopPropagation();advanceLead('${l.id}')">${icon("chevright")}</button>` : ""}</div>`;
 }
 
+/* ========================= NÚMEROS DEL NEGOCIO =========================
+   Los de `CFG.metrics` son DIARIOS (peso, horas). Estos se mueven en otro
+   reloj: ingreso del mes, clientes activos, ahorro para la visa. Por eso
+   son un almacén aparte con su propia clave de periodo, no una variante del
+   diario.
+
+   REGLA DE MONEDA: `unit` es la etiqueta de la unidad y NUNCA se suma entre
+   unidades distintas. Lo freelance está en MXN y la inversión de la visa en
+   USD: juntarlas en un número daría un total falso. Cada métrica se lee
+   sola, con su unidad pegada. Si alguna vez hace falta un agregado, tiene
+   que ir agrupado por unidad (`sumByUnit`), nunca en una sola cifra. */
+const BIZ_PERIODS = ["semana", "mes"];
+
+/* Semana ISO 8601 (la que empieza en lunes; manda el jueves de esa semana).
+   Hacerlo bien importa en el cambio de año: el 2025-12-29 pertenece a la
+   semana 1 de 2026, no a la última de 2025. */
+function isoWeekKey(dateKey) {
+  const dt = new Date((dateKey || today()) + "T00:00:00");
+  const dow = (dt.getDay() + 6) % 7;               // lunes = 0
+  dt.setDate(dt.getDate() - dow + 3);              // jueves de esa semana
+  const isoYear = dt.getFullYear();
+  const jan4 = new Date(isoYear, 0, 4);
+  const j4dow = (jan4.getDay() + 6) % 7;
+  const week1Thu = new Date(isoYear, 0, 4 - j4dow + 3);
+  const week = 1 + Math.round((dt - week1Thu) / 604800000);
+  return isoYear + "-W" + String(week).padStart(2, "0");
+}
+function monthKey(dateKey) { return (dateKey || today()).slice(0, 7); }
+function periodKey(period, dateKey) { return period === "semana" ? isoWeekKey(dateKey) : monthKey(dateKey); }
+/* Las N periodos que terminan en `endKey`, en orden cronológico. */
+function lastNPeriods(period, n, endKey) {
+  const out = [];
+  if (period === "mes") {
+    const t = endKey || today(), y = +t.slice(0, 4), m = +t.slice(5, 7) - 1;
+    for (let i = n - 1; i >= 0; i--) { const d = new Date(y, m - i, 1); out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")); }
+  } else {
+    let d = endKey || today();
+    const ks = [];
+    for (let i = 0; i < n; i++) { ks.push(isoWeekKey(d)); d = addDays(d, -7); }
+    ks.reverse().forEach(k => out.push(k));
+  }
+  return out;
+}
+function prevPeriodKey(period, endKey) { const ps = lastNPeriods(period, 2, endKey); return ps[0]; }
+function periodLabel(period, key) {
+  if (period === "mes") {
+    const y = +key.slice(0, 4), m = +key.slice(5, 7) - 1;
+    return cap(new Date(y, m, 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" }));
+  }
+  return "Semana " + key.slice(6) + " de " + key.slice(0, 4);
+}
+
+function bizMetric(id) { return BIZ.metrics.find(m => m.id === id) || null; }
+function bizMval(id, pk) {
+  const row = BIZ.mvals[id];
+  const v = row ? row[pk] : undefined;
+  return (v === undefined || v === null || v === "") ? null : Number(v);
+}
+function setBizMval(id, pk, v) {
+  if (!BIZ.mvals[id]) BIZ.mvals[id] = {};
+  if (v === null) delete BIZ.mvals[id][pk]; else BIZ.mvals[id][pk] = v;
+  saveBiz();
+}
+function bizMvals(id, period, n, endKey) { return lastNPeriods(period, n, endKey).map(pk => bizMval(id, pk)); }
+/* Único agregado permitido: agrupado por unidad. Devuelve {unidad: suma}. */
+function sumByUnit(metrics, pk) {
+  const out = {};
+  metrics.forEach(m => {
+    const v = bizMval(m.id, pk || periodKey(m.period));
+    if (v === null) return;
+    const u = (m.unit || "").trim() || "—";
+    out[u] = (out[u] || 0) + v;
+  });
+  return out;
+}
+
+/* ========================= IDEAS =========================
+   La única métrica que importa aquí es la velocidad de captura: si toma más
+   de tres segundos, la idea se pierde o secuestra el día. Por eso el campo
+   vive siempre visible arriba y guarda con Enter o con un tap. */
+const IDEA_STATUS = ["inbox", "guardada", "descartada"];
+function bizIdea(id) { return BIZ.ideas.find(i => i.id === id) || null; }
+function captureIdea() {
+  const el = document.getElementById("ideaIn"); if (!el) return;
+  const text = (el.value || "").trim(); if (!text) return;
+  BIZ.ideas.unshift({ id: uid("idea"), text: text, ts: Date.now(), status: "inbox", projectId: "" });
+  el.value = "";
+  saveBiz(); render();
+  const again = document.getElementById("ideaIn"); if (again) again.focus();
+}
+function setIdeaStatus(id, st) { const i = bizIdea(id); if (!i) return; i.status = st; saveBiz(); closeModal(); render(); }
+function ideasSorted() {
+  const rank = { inbox: 0, guardada: 1, descartada: 2 };
+  return BIZ.ideas.slice().sort((a, b) => (rank[a.status] - rank[b.status]) || (b.ts - a.ts));
+}
+/* Promover: una idea se vuelve proyecto, o la próxima acción de uno. */
+function openPromoteIdea(id) {
+  const i = bizIdea(id); if (!i) return;
+  const ps = BIZ.projects.filter(p => p.status === "activo");
+  sheet(`<h3>Promover idea</h3><div class="mm">${esc(i.text)}</div>
+    <button class="btn p" onclick="ideaToProject('${id}')">${icon("plus")} Convertirla en proyecto</button>
+    ${ps.length ? `<div class="lbl">O volverla la próxima acción de</div>`
+      + ps.map(p => `<div class="row" onclick="ideaToNextAction('${id}','${p.id}')">
+          <span class="dotc" style="background:${p.color}"></span>
+          <div class="body"><div class="name">${esc(p.name)}</div><div class="sub">${p.nextAction ? "reemplaza: " + esc(p.nextAction) : "sin próxima acción"}</div></div>
+          <span class="chev">${icon("chevron")}</span></div>`).join("") : ""}
+    <button class="btn g" onclick="setIdeaStatus('${id}','guardada')">Solo guardarla</button>
+    <button class="btn g" style="color:var(--bad)" onclick="setIdeaStatus('${id}','descartada')">Descartar</button>
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+function ideaToProject(id) {
+  const i = bizIdea(id); if (!i) return;
+  const p = { id: uid("pj"), name: i.text.slice(0, 60), color: PALETTE[5], status: "activo", why: "", nextAction: "", nextActionDue: "", updatedAt: Date.now() };
+  BIZ.projects.push(p);
+  i.status = "guardada"; i.projectId = p.id;
+  saveBiz(); closeModal(); NEGTAB = "proyectos"; render(); openBizProject(p.id);
+}
+function ideaToNextAction(id, projectId) {
+  const i = bizIdea(id), p = bizProject(projectId); if (!i || !p) return;
+  p.nextAction = i.text; p.nextActionDue = ""; touchProject(p);
+  i.status = "guardada"; i.projectId = p.id;
+  saveBiz(); closeModal(); render();
+}
+
+/* ========================= SESIONES DE FOCO =========================
+   El cronómetro es POR MARCA DE TIEMPO, igual que el descanso del
+   reproductor de gym: se guarda `startedAt` y el transcurrido se recalcula
+   con Date.now(). Un setInterval que suma de a uno se congela cuando se
+   bloquea la pantalla o la app pasa a segundo plano, y devolvería basura.
+   El intervalo aquí solo repinta el texto; la verdad siempre es el reloj.
+   La sesión en curso vive en `mt_focusRun`, como `mt_activeWorkout`. */
+function getFocusRun() {
+  const r = safeJSON(store.get("mt_focusRun"));
+  if (!r || !r.projectId || !r.startedAt) return null;
+  if (!bizProject(r.projectId)) return null;   // el proyecto ya no existe
+  return r;
+}
+function saveFocusRun(r) { store.set("mt_focusRun", JSON.stringify(r)); }
+function clearFocusRun() { store.set("mt_focusRun", ""); }
+function focusElapsed(r) { return (r.baseSeconds || 0) + Math.max(0, Math.floor((Date.now() - r.startedAt) / 1000)); }
+function startFocus(projectId) {
+  if (!bizProject(projectId)) return;
+  saveFocusRun({ projectId: projectId, startedAt: Date.now(), baseSeconds: 0 });
+  closeModal(); render();
+}
+function stopFocus() {
+  const r = getFocusRun(); if (!r) return;
+  const secs = focusElapsed(r);
+  if (secs >= 1) BIZ.focus.push({ id: uid("fs"), date: today(), projectId: r.projectId, seconds: secs, note: "" });
+  clearFocusRun(); saveBiz(); closeModal(); render();
+}
+function discardFocus() { clearFocusRun(); closeModal(); render(); }
+function fmtHrs(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (!h && !m) return "0m";
+  return (h ? h + "h" : "") + (h && m ? " " : "") + (m ? m + "m" : "");
+}
+function fmtClock(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : String(m)) + ":" + String(r).padStart(2, "0");
+}
+function focusSeconds(projectId, from) {
+  return BIZ.focus.filter(f => (!projectId || f.projectId === projectId) && (!from || f.date >= from))
+    .reduce((a, f) => a + (Number(f.seconds) || 0), 0);
+}
+function focusWeek(projectId) { return focusSeconds(projectId, weekDates()[0]); }
+/* Registrar a mano (se me olvidó arrancarlo). */
+function openFocusManual(projectId) {
+  const ps = BIZ.projects.filter(p => p.status === "activo");
+  if (!ps.length) return;
+  _focusProj = projectId || (ps[0] && ps[0].id) || "";
+  sheet(`<h3>Registrar foco</h3><div class="mm">Para cuando trabajaste sin arrancar el cronómetro.</div>
+    <div class="lbl">Proyecto</div><div class="chips" id="fmProj" style="padding:0">${ps.map(p => `<div class="chip ${p.id === _focusProj ? "on" : ""}" data-p="${p.id}" onclick="pickFocusProj('${p.id}')" style="${p.id === _focusProj ? `background:${p.color};border-color:${p.color};color:#0E0F13` : ""}">${esc(p.name)}</div>`).join("")}</div>
+    <div class="row2"><div><div class="lbl">Minutos</div><input id="fmMin" class="field" type="number" inputmode="numeric" min="1" placeholder="60"></div>
+      <div><div class="lbl">Día</div><input id="fmDate" class="field" type="date" value="${today()}"></div></div>
+    <div class="lbl">Nota (opcional)</div><input id="fmNote" class="field" placeholder="En qué se fue el tiempo">
+    <button class="btn p" onclick="saveFocusManual()">Guardar</button>
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+let _focusProj = "";
+function pickFocusProj(pid) {
+  _focusProj = pid;
+  document.querySelectorAll("#fmProj .chip").forEach(c => {
+    const on = c.dataset.p === pid, p = bizProject(c.dataset.p);
+    c.classList.toggle("on", on);
+    c.style.background = on && p ? p.color : ""; c.style.borderColor = on && p ? p.color : ""; c.style.color = on ? "#0E0F13" : "";
+  });
+}
+function saveFocusManual() {
+  const min = parseInt(document.getElementById("fmMin").value, 10);
+  if (!_focusProj || !min || min <= 0) return;
+  BIZ.focus.push({
+    id: uid("fs"), date: document.getElementById("fmDate").value || today(),
+    projectId: _focusProj, seconds: min * 60, note: document.getElementById("fmNote").value.trim()
+  });
+  saveBiz(); closeModal(); render();
+}
+function delFocus(id) { BIZ.focus = BIZ.focus.filter(f => f.id !== id); saveBiz(); closeModal(); render(); }
+
+/* ========================= REVISIÓN SEMANAL DEL NEGOCIO =========================
+   Hermana de la revisión de vida: misma regla de `reviewDateFor` (se pinta
+   domingo y lunes, y SIEMPRE escribe sobre el domingo que cerró la semana).
+   Se pre-llena con hechos que la app ya sabe, para que el ejercicio sea
+   reflexionar y no tratar de acordarse. */
+function bizReview(rd) { return BIZ.reviews[rd] || { moved: "", stuck: "", focus: "" }; }
+function hasBizReview(rd) { const r = BIZ.reviews[rd]; return !!(r && (r.moved || r.stuck || r.focus)); }
+function bizWeekFacts(rd) {
+  const from = addDays(rd, -6), fromTs = new Date(from + "T00:00:00").getTime();
+  const toTs = new Date(rd + "T00:00:00").getTime() + 86400000;
+  const inRange = ts => ts >= fromTs && ts < toTs;
+  const acciones = BIZ.done.filter(x => inRange(x.doneAt)).length;
+  const leads = BIZ.leads.filter(l => inRange(l.stageAt)).length;
+  const segundos = BIZ.focus.filter(f => f.date >= from && f.date <= rd).reduce((a, f) => a + (Number(f.seconds) || 0), 0);
+  const nums = BIZ.metrics.filter(m => bizMval(m.id, periodKey(m.period, rd)) !== null).length;
+  return { acciones: acciones, leads: leads, segundos: segundos, nums: nums, from: from };
+}
+function saveBizReview(rd) {
+  BIZ.reviews[rd] = {
+    moved: (document.getElementById("brM") || {}).value || "",
+    stuck: (document.getElementById("brS") || {}).value || "",
+    focus: (document.getElementById("brF") || {}).value || ""
+  };
+  saveBiz(); render();
+}
+
 /* ---------- La vista del pipeline ---------- */
 function pipelineView() {
   if (!BIZ.leads.length) {
@@ -2126,6 +2573,7 @@ function openBizProject(id) {
     <div class="lbl">Mi para qué</div><textarea id="bpWhy" placeholder="¿Por qué existe este proyecto?">${esc(v.why)}</textarea>
     <div class="lbl">Próxima acción</div><input id="bpNa" class="field" value="${esc(v.nextAction)}" placeholder="El siguiente paso concreto">
     <div class="lbl">¿Para cuándo? (opcional)</div><input id="bpDue" class="field" type="date" value="${esc(v.nextActionDue || "")}">
+    ${editing ? focusSummaryBlock(id) : ""}
     ${editing ? doneHistoryBlock(id) : ""}
     <button class="btn p" onclick="saveBizProject('${editing ? id : ""}')">${editing ? "Guardar" : "Crear proyecto"}</button>
     ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelProject('${id}')">Borrar proyecto</button>` : ""}
@@ -2137,9 +2585,47 @@ function doneHistoryBlock(id) {
   const h = projectDone(id);
   if (!h.length) return `<div class="lbl">Hecho</div><div class="empty" style="text-align:left;padding:4px 2px">Todavía nada. Lo que cierres aparece aquí.</div>`;
   return `<div class="lbl">Hecho (${h.length})</div>`
-    + h.slice(0, 8).map(x => `<div class="catrow"><span>${esc(x.text)}</span><span class="amt">${fmtShort(toKey(new Date(x.doneAt)))}</span></div>`).join("")
+    + `<div class="empty" style="text-align:left;padding:2px 2px 6px">Toca una para devolverla a próxima acción.</div>`
+    + h.slice(0, 8).map(x => `<div class="catrow" style="cursor:pointer" onclick="restoreDone('${x.id}')"><span>${esc(x.text)}</span><span class="amt">${fmtShort(toKey(new Date(x.doneAt)))}</span></div>`).join("")
     + (h.length > 8 ? `<div class="empty" style="padding:6px">y ${h.length - 8} más</div>` : "");
 }
+/* Tiempo dedicado a un proyecto: esta semana y en total. */
+function focusSummaryBlock(id) {
+  const sem = focusWeek(id), tot = focusSeconds(id);
+  const ses = BIZ.focus.filter(f => f.projectId === id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  return `<div class="lbl">Foco</div>
+    <div class="statrow"><div class="stat"><b>${fmtHrs(sem)}</b><span>esta semana</span></div>
+      <div class="stat"><b style="color:var(--text)">${fmtHrs(tot)}</b><span>en total</span></div></div>
+    ${ses.map(f => `<div class="catrow"><span>${cap(fmtShort(f.date))}${f.note ? " · " + esc(f.note) : ""}</span><span class="amt">${fmtHrs(f.seconds)}</span></div>`).join("")}`;
+}
+
+/* ---------- Deshacer un "Listo" ----------
+   Completar está a un tap de un botón verde muy visible, así que tiene que
+   haber camino de vuelta: se toca la línea en "Hecho" y la acción regresa a
+   ser la próxima. Si ya hay una escrita se pregunta antes de pisarla: nunca
+   se descarta trabajo en silencio. */
+function restoreDone(doneId) {
+  const d = BIZ.done.find(x => x.id === doneId); if (!d) return;
+  const p = bizProject(d.projectId); if (!p) return;
+  if (p.nextAction) {
+    sheet(`<h3>Ya hay una próxima acción</h3>
+      <div class="mm">${esc(p.name)} · si devuelves la de antes, la de ahora se pierde.</div>
+      <div class="lbl">Ahora</div><div class="catrow"><span>${esc(p.nextAction)}</span></div>
+      <div class="lbl">Volvería a ser</div><div class="catrow"><span>${esc(d.text)}</span></div>
+      <button class="btn p" onclick="doRestoreDone('${doneId}')">Reemplazar</button>
+      <button class="btn g" onclick="openBizProject('${p.id}')">Cancelar</button>`);
+    return;
+  }
+  doRestoreDone(doneId);
+}
+function doRestoreDone(doneId) {
+  const d = BIZ.done.find(x => x.id === doneId); if (!d) return;
+  const p = bizProject(d.projectId); if (!p) return;
+  p.nextAction = d.text; p.nextActionDue = ""; touchProject(p);
+  BIZ.done = BIZ.done.filter(x => x.id !== doneId);
+  saveBiz(); closeModal(); render();
+}
+
 function saveBizProject(id) {
   const name = document.getElementById("bpName").value.trim();
   if (!name) return;

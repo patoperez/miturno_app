@@ -56,12 +56,13 @@ BIZ
   projects[]  {id, name, color, status, why, nextAction, nextActionDue, updatedAt}
   leads[]     {id, name, contact, stage, value, followUp, notes, projectId, stageAt, updatedAt}
   done[]      {id, projectId, text, doneAt}
-  metrics[]   vacío  (siguiente entrega)
-  mvals{}     vacío  (siguiente entrega)
-  ideas[]     vacío  (siguiente entrega)
-  focus[]     vacío  (siguiente entrega)
-  reviews{}   vacío  (siguiente entrega)
+  metrics[]   {id, name, unit, target, period}          period: "semana" | "mes"
+  mvals{}     {metricId: {periodKey: número}}           "2026-W35" o "2026-08"
+  ideas[]     {id, text, ts, status, projectId}         status: "inbox" | "guardada" | "descartada"
+  focus[]     {id, date, projectId, seconds, note}
+  reviews{}   {domingoYYYY-MM-DD: {moved, stuck, focus}}
 ```
+Además, la **sesión de foco en curso** vive fuera de `BIZ`, en su propia clave `mt_focusRun` (`{projectId, startedAt, baseSeconds}`), igual que `mt_activeWorkout`. Está en `BACKUP_KEYS`.
 
 - Los contenedores vacíos **existen desde ya** para que la siguiente entrega agregue comportamiento sin migrar nada.
 - `status` es `"activo" | "pausado" | "terminado"` (`BIZ_STATUS`). `color` sale de `PALETTE`. `updatedAt` se refresca en **cada** edición vía `touchProject(p)`.
@@ -83,6 +84,35 @@ Completar una acción **no la tira**: `completeNextAction` la empuja a `done` **
 - El detalle del proyecto pinta el bloque **"Hecho"** (`doneHistoryBlock`) con las últimas 8.
 - `doneThisWeek()` cuenta desde el **lunes** de la semana en curso (`weekStartTs()`, apoyado en `weekDates()[0]`), y se muestra como `.statrow` en la pestaña de Proyectos. Es la recompensa que le faltaba al módulo: sin esto solo reclama.
 - Completar un proyecto **sin** acción escrita no ensucia el historial.
+- **Se puede deshacer:** tocar una línea del bloque "Hecho" la devuelve a `nextAction` (`restoreDone`) y la saca de `done`. Si ya hay una próxima acción escrita, **pregunta antes de pisarla** mostrando las dos: nunca se descarta trabajo en silencio.
+
+### Números del negocio (`metrics[]` / `mvals{}`)
+Los de `CFG.metrics` son **diarios** (peso, horas). Estos se mueven en otro reloj, así que son un almacén aparte y no una variante del diario.
+- `period` es `"semana"` o `"mes"`. La clave de periodo la da `periodKey(period, fecha)`:
+  - **mes** → `monthKey` → `"2026-08"`.
+  - **semana** → `isoWeekKey` → `"2026-W35"`, semana **ISO 8601** (empieza en lunes, manda el jueves). Hacerlo bien importa en el cambio de año: `2025-12-29` es `2026-W01`, y `2027-01-03` sigue siendo `2026-W53`. No lo cambies por `getWeek()` casero.
+- `lastNPeriods(period, n, endKey)` da los N periodos en orden cronológico y cruza el año solo; `prevPeriodKey` es el anterior.
+- **REGLA DE MONEDA, no cosmética:** `unit` es la etiqueta de la unidad (MXN, USD, clientes, hrs) y **NUNCA se suman unidades distintas**. Lo freelance está en MXN y la inversión de la visa en USD: un total combinado sería un número falso. Cada número se lee solo, con su unidad pegada por `fmtNum`. El único agregado permitido es `sumByUnit(metrics)`, que devuelve `{unidad: suma}` — **si alguna vez imprimes una sola cifra que cruce unidades, está mal.**
+- `fmtNum` ahora usa separadores de miles (`45,000`); la unidad va en `<i>` y se estila igual dentro y fuera de `.mval`.
+- Capturar arranca en el **periodo actual** (`openBizMval`), con chips para los 4 periodos recientes.
+
+### Ideas (`ideas[]`)
+Lo único que importa es la velocidad de captura: si toma más de tres segundos, la idea se pierde. El campo `#ideaIn` vive **siempre visible** arriba de la pestaña y guarda con Enter o con un tap (`captureIdea`). Nada de modal ni de formulario.
+- Orden: `inbox` primero, luego `guardada`, y `descartada` al final y atenuada.
+- **Descartar es un cambio de estado, no un borrado**: siempre se puede recuperar.
+- Promover (`openPromoteIdea`) la convierte en proyecto (`ideaToProject`) o en la próxima acción de uno (`ideaToNextAction`), y deja `projectId` apuntando.
+
+### Sesiones de foco (`focus[]` + `mt_focusRun`)
+- El cronómetro es **por marca de tiempo**, igual que el descanso del reproductor de gym: se guarda `startedAt` y el transcurrido se recalcula con `Date.now()` (`focusElapsed`). Un `setInterval` que suma de a uno se congela cuando se bloquea la pantalla o la app pasa a segundo plano y devolvería basura. **El intervalo aquí solo repinta el texto; la verdad siempre es el reloj.**
+- La sesión en curso se persiste en `mt_focusRun`, así que sobrevive a cerrar la app. `getFocusRun()` devuelve `null` si el proyecto ya no existe, para no dejar sesiones huérfanas.
+- Un `visibilitychange` repinta al volver de segundo plano. `armFocusTimer()` se llama al final de `renderNegocio`.
+- También se puede registrar a mano (`openFocusManual`) para cuando se olvidó arrancarlo.
+- `focusSeconds(projectId, desde)` y `focusWeek(projectId)` alimentan el detalle del proyecto y la tarjeta de foco.
+
+### Revisión semanal del negocio (`reviews{}`)
+Hermana de la revisión de vida: **misma** regla de `reviewDateFor` (se pinta domingo y lunes, y **siempre escribe sobre el domingo que cerró la semana**, así que el lunes edita el mismo registro). Se guarda en `BIZ.reviews[domingo]`.
+- Se pre-llena con hechos que la app ya sabe (`bizWeekFacts`): acciones cerradas, leads movidos, horas de foco y números capturados en esa semana. La idea es reflexionar, no tratar de acordarse.
+- Se lee de vuelta en **Bitácora**, junto a la revisión de vida. `bitacoraList` mezcla las claves de `LOG` con las de `BIZ.reviews`, así que un domingo con revisión de negocio aparece aunque ese día no haya nota ni mood.
 
 ### Pipeline (`leads[]`): el mini CRM
 Lo que genera ingreso y lo que más fácil se olvida. Un lead que lleva días en la misma etapa se está enfriando, así que el tiempo **en etapa** (`stageAt`) pesa tanto como la fecha de seguimiento.
@@ -93,7 +123,7 @@ Lo que genera ingreso y lo que más fácil se olvida. Un lead que lleva días en
 - `leadRank(l)` ordena igual que los proyectos: **0** vencido, **1** hoy, **2** sin fecha, **3** enfriándose, **4** el resto.
 - **Avanzar es un tap** desde la fila (`advanceLead` → `nextStage`), y ahí mismo se ofrece la próxima fecha con atajos de un tap (`pickFollow`: mañana / 3 días / 1 semana / 2 semanas), igual que completar una acción pregunta por la siguiente. Llegar a `cerrado` no pide seguimiento.
 - `value` se guarda como número o cadena vacía, nunca `NaN`. Cada etapa muestra conteo y suma (`sumValue`).
-- La pestaña Negocio tiene un control segmentado **Proyectos / Pipeline** (`NEGTAB`, en memoria: no agrega ninguna clave `mt_*`). La pestaña Pipeline muestra en rojo cuántos seguimientos están vencidos.
+- La pestaña Negocio tiene un control segmentado **Proyectos / Pipeline / Números / Ideas** (`NEGTAB`, en memoria: no agrega ninguna clave `mt_*`). Pipeline muestra en rojo los seguimientos vencidos e Ideas en ámbar los de la bandeja. La revisión semanal del negocio se pinta **arriba** del control, porque no pertenece a ninguna pestaña.
 
 ## Datos de entrenamiento (`WORKOUTS`, clave `mt_workouts`)
 Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,exId,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
@@ -178,7 +208,7 @@ Dos detalles del harness: el stub de elemento necesita `getContext()` para los `
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
-Para Negocio: que crear/editar/borrar un proyecto o un lead persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar (con `leads` y `done` dentro), que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, que avanzar de etapa mueva `stageAt`, que el conteo semanal no cuente lo del domingo anterior, y que Hoy se pinte con cero proyectos, con cero leads y con varios de ambos.
+Para Negocio: que restaurar una acción hecha la devuelva y pregunte al pisar otra, que las claves de periodo semanal y mensual sean correctas en el cambio de año, que dos números con unidades distintas **nunca** se sumen, que una idea se capture y persista, que una sesión de foco sobreviva un segundo plano simulado (mover `startedAt` hacia atrás) y registre la duración correcta, que la revisión escriba en el domingo correcto tanto desde domingo como desde lunes, que crear/editar/borrar un proyecto o un lead persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar (con `leads` y `done` dentro), que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, que avanzar de etapa mueva `stageAt`, que el conteo semanal no cuente lo del domingo anterior, y que Hoy se pinte con cero proyectos, con cero leads y con varios de ambos.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 
 ## Layout / navegación
