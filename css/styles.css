@@ -129,7 +129,7 @@ body{
 .mval.on{color:var(--text);}
 .mval i{font-style:normal; font-size:11px; font-weight:600; color:var(--muted2); margin-left:3px;}
 /* fmtNum marca la unidad con <i>; fuera de .mval salia en cursiva y pegada. */
-.gpct i, .catrow i, .stat i, .bizmeta i{font-style:normal; font-size:.85em; font-weight:600; color:var(--muted2); margin-left:3px;}
+.gpct i, .catrow i, .stat i, .bizmeta i, .row .sub i, .sec-h .meta i{font-style:normal; font-size:.85em; font-weight:600; color:var(--muted2); margin-left:3px;}
 .metrow{padding:10px 2px 4px;}
 .metrow + .metrow{border-top:1px solid var(--line);}
 .metrow-h{display:flex; align-items:center; gap:9px; font-size:14px;}

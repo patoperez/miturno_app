@@ -597,14 +597,19 @@ function gymCardHoy(d) {
      que tiene sentido es ver lo que sí se registró. */
   if (d !== today()) {
     const past = WORKOUTS.filter(w => w.date === d);
+    const clases = CFG.activities.filter(a => a.type === "class");
+    /* Se puede registrar a posteriori: el resto de la app deja corregir el
+       pasado, los entrenos no eran la excepción por diseño sino por omisión. */
+    const alta = `<div class="gymlinks"><button onclick="openManualWorkout('${d}')">${icon("plus")} Registrar entreno</button>`
+      + clases.map(a => `<button style="border-color:${a.color}44" onclick="openLogSession('${a.id}','${d}')">${esc(a.name)}</button>`).join("") + `</div>`;
     if (!past.length) return sec("h_gym", "Workouts", "—",
-      `<div class="empty" style="padding:6px 6px 10px;text-align:left">Ese día no registraste entrenamiento.</div>`, "dumbbell", "var(--cuerpo)");
+      `<div class="empty" style="padding:6px 6px 10px;text-align:left">Ese día no registraste entrenamiento.</div>` + alta, "dumbbell", "var(--cuerpo)");
     const body = past.map(w => {
       const a = getAct(w.activityId);
       return `<div class="row"><span class="idi" style="background:${a.color}22;color:${a.color}">${icon(a.icon)}</span>
         <div class="body" onclick="openWorkoutDetail('${w.id}')"><div class="name">${esc(w.name)}</div><div class="sub">${workoutSummary(w)}</div></div></div>`;
     }).join("");
-    return sec("h_gym", "Workouts", String(past.length), body, "dumbbell", "var(--cuerpo)");
+    return sec("h_gym", "Workouts", String(past.length), body + alta, "dumbbell", "var(--cuerpo)");
   }
   const act = getActiveWorkout();
   if (act) {
@@ -1012,6 +1017,7 @@ function renderWorkouts() {
   const vol = workoutsInRange(wd[0], wd[6]).reduce((a, w) => a + (w.volume || 0), 0);
   out += sec("w_stats", "Resumen", "", `<div class="statrow"><div class="stat"><b>${sem}</b><span>días esta semana</span></div><div class="stat"><b>${mes}</b><span>este mes</span></div><div class="stat"><b>${Math.round(vol / 1000 * 10) / 10 || 0}k</b><span>vol. semana (kg)</span></div></div>`, "chart", "var(--ok)");
   // Historial
+  out += `<button class="addbtn" onclick="openManualWorkout()">${icon("plus")} Registrar un entreno pasado</button>`;
   const hist = WORKOUTS.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
   out += sec("w_hist", "Historial", String(WORKOUTS.length), hist.length ? hist.map(w => {
     const a = getAct(w.activityId);
@@ -1199,12 +1205,24 @@ function delWorkout(id) { WORKOUTS = WORKOUTS.filter(w => w.id !== id); saveWork
 
 /* ---------- Registrar sesión de clase ---------- */
 let _sInt = null;
+/* Nunca al futuro: no se registra lo que no ha pasado. */
+function clampPast(d) { const t = today(); return (!d || d > t) ? t : d; }
+/* Marca el hábito de gym del día que sea. Un entreno registrado a
+   posteriori tiene que contar igual que uno en vivo, y un día pasado está
+   congelado: por eso hay que recalcularlo. */
+function markGymHabit(d) {
+  const gh = CFG.habits.find(h => h.id === "gym") || CFG.habits.find(h => /gym|entren/i.test(h.name));
+  if (!gh) return;
+  const l = day(d); l.habits[gh.id] = true;
+  recalcDay(d); saveLog();
+}
 function openLogSession(actId, dateStr) {
   const a = getAct(actId); _sInt = null;
-  const dd = dateStr || today();
+  const dd = clampPast(dateStr);
   sheet(`<span class="idi" style="width:44px;height:44px;background:${a.color}22;color:${a.color};display:flex;align-items:center;justify-content:center;border-radius:12px">${icon(a.icon)}</span>
     <h3 style="margin-top:8px">Registrar ${esc(a.name)}</h3><div class="mm">${cap(fmtDate(dd))}</div>
-    <div class="lbl">Duración (min)</div><input id="sDur" class="field" type="number" min="0" placeholder="60" inputmode="numeric">
+    <div class="row2"><div><div class="lbl">Duración (min)</div><input id="sDur" class="field" type="number" min="0" placeholder="60" inputmode="numeric"></div>
+      <div><div class="lbl">Día</div><input id="sDate" class="field" type="date" max="${today()}" value="${dd}"></div></div>
     <div class="lbl">Intensidad</div><div class="scale">${[1,2,3,4,5,6,7,8,9,10].map(i => `<b onclick="pickIntensity(this,${i})">${i}</b>`).join("")}</div>
     <div class="lbl">Notas (opcional)</div><textarea id="sNote" placeholder="Cómo estuvo, técnicas, sparring..."></textarea>
     <button class="btn p" onclick="saveSession('${actId}','${dd}')">Guardar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
@@ -1213,8 +1231,89 @@ function pickIntensity(el, i) { _sInt = i; document.querySelectorAll(".scale b")
 function saveSession(actId, dd) {
   const a = getAct(actId);
   const dur = parseInt(document.getElementById("sDur").value) || 0;
-  WORKOUTS.push({ id: uid("w"), date: dd, activityId: actId, type: "class", name: a.name, duration: dur, intensity: _sInt, notes: document.getElementById("sNote").value.trim() });
-  _sInt = null; saveWorkouts(); closeModal(); render();
+  const el = document.getElementById("sDate");
+  const d = clampPast((el && el.value) || dd);
+  WORKOUTS.push({ id: uid("w"), date: d, activityId: actId, type: "class", name: a.name, duration: dur, intensity: _sInt, notes: document.getElementById("sNote").value.trim() });
+  _sInt = null; saveWorkouts(); markGymHabit(d); closeModal(); render();
+}
+
+/* ---------- Entreno de fuerza registrado a mano ----------
+   Si entrené ayer y se me olvidó abrir el reproductor, esa sesión no se
+   pierde. Cada serie pasa por el catálogo de ejercicios (`exId`), así que
+   alimenta records, historial y estadísticas exactamente igual que una
+   sesión en vivo. */
+let _MW = null;
+function openManualWorkout(dateStr) {
+  _MW = { date: clampPast(dateStr), routineId: "", name: "", dur: "", sets: [] };
+  renderManualWorkout();
+}
+function mwSetDate(v) { _MW.date = clampPast(v); renderManualWorkout(); }
+function mwPickRoutine(rid) {
+  _MW.routineId = rid;
+  const r = CFG.routines.find(x => x.id === rid);
+  _MW.name = r ? r.name : "";
+  renderManualWorkout();
+}
+function mwDelSet(i) { _MW.sets.splice(i, 1); renderManualWorkout(); }
+function renderManualWorkout() {
+  const r = CFG.routines.find(x => x.id === _MW.routineId);
+  const U = weightUnit();
+  const filas = _MW.sets.length
+    ? _MW.sets.map((s, i) => `<div class="catrow"><span>${esc(s.exName)}</span>
+        <span class="amt">${s.weight ? esc(s.weight) + " " + U : "—"} × ${esc(s.reps) || "—"}
+        <button class="note-btn" style="display:inline-flex;margin-left:8px" onclick="mwDelSet(${i})">${icon("trash")}</button></span></div>`).join("")
+    : `<div class="empty">Sin series todavía</div>`;
+  sheet(`<h3>Registrar entreno</h3><div class="mm">Para el entreno que hiciste pero no registraste.</div>
+    <div class="row2"><div><div class="lbl">Día</div><input class="field" type="date" max="${today()}" value="${_MW.date}" onchange="mwSetDate(this.value)"></div>
+      <div><div class="lbl">Duración (min)</div><input id="mwDur" class="field" type="number" inputmode="numeric" min="0" value="${esc(_MW.dur)}" placeholder="60" onchange="_MW.dur=this.value"></div></div>
+    <div class="lbl">Rutina (opcional)</div><div class="chips" style="padding:0">
+      <div class="chip ${!_MW.routineId ? "on" : ""}" style="${!_MW.routineId ? "background:var(--cuerpo);border-color:var(--cuerpo);color:#fff" : ""}" onclick="mwPickRoutine('')">Sin rutina</div>
+      ${CFG.routines.map(x => `<div class="chip ${_MW.routineId === x.id ? "on" : ""}" style="${_MW.routineId === x.id ? "background:var(--cuerpo);border-color:var(--cuerpo);color:#fff" : ""}" onclick="mwPickRoutine('${x.id}')">${esc(x.name)}</div>`).join("")}</div>
+    <div class="lbl">Series (${_MW.sets.length})</div>${filas}
+    <button class="addbtn" onclick="openMwSet()">${icon("plus")} Agregar series</button>
+    <button class="btn p" onclick="saveManualWorkout()">Guardar entreno</button>
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+}
+/* Agregar varias series iguales de un jalón: 4×8 a 60 kg es una sola alta. */
+function openMwSet() {
+  const r = CFG.routines.find(x => x.id === _MW.routineId);
+  const sug = (r ? r.exercises.map(e => exName(e.exId, e.name)) : [])
+    .concat((CFG.exercises || []).map(e => e.name))
+    .filter((v, i, a) => a.indexOf(v) === i).slice(0, 40);
+  sheet(`<h3>Agregar series</h3><div class="mm">El nombre entra al catálogo, así que cuenta para tus records.</div>
+    <div class="lbl">Ejercicio</div><input id="mwEx" class="field" list="mwExList" placeholder="Press banca">
+    <datalist id="mwExList">${sug.map(nm => `<option value="${esc(nm)}"></option>`).join("")}</datalist>
+    <div class="row2"><div><div class="lbl">Peso (${weightUnit()})</div><input id="mwW" class="field" inputmode="decimal" placeholder="60"></div>
+      <div><div class="lbl">Reps</div><input id="mwR" class="field" inputmode="numeric" placeholder="8"></div></div>
+    <div class="lbl">¿Cuántas series iguales?</div><input id="mwN" class="field" type="number" inputmode="numeric" min="1" value="1">
+    <button class="btn p" onclick="addMwSet()">Agregar</button>
+    <button class="btn g" onclick="renderManualWorkout()">Cancelar</button>`);
+  const el = document.getElementById("mwEx"); if (el) el.focus();
+}
+function addMwSet() {
+  const nm = (document.getElementById("mwEx").value || "").trim();
+  if (!nm) return;
+  const cat = findOrCreateExercise(nm);   // mismo catálogo que una sesión en vivo
+  const w = (document.getElementById("mwW").value || "").trim();
+  const reps = (document.getElementById("mwR").value || "").trim();
+  const n = Math.max(1, parseInt(document.getElementById("mwN").value, 10) || 1);
+  for (let i = 0; i < n; i++) _MW.sets.push({ exName: cat.name, exId: cat.id, weight: w, reps: reps });
+  saveCfg();
+  renderManualWorkout();
+}
+function saveManualWorkout() {
+  if (!_MW || !_MW.sets.length) return;
+  const d = clampPast(_MW.date);
+  const vol = _MW.sets.reduce((a, s) => { const w = parseFloat(s.weight), r = parseInt(s.reps, 10); return a + (isNaN(w) || isNaN(r) ? 0 : w * r); }, 0);
+  const mins = parseInt(_MW.dur, 10);
+  WORKOUTS.push({
+    id: uid("w"), date: d, activityId: "gym", type: "strength",
+    routineId: _MW.routineId || null, name: _MW.name || "Entreno",
+    duration: isNaN(mins) ? 0 : mins * 60, volume: vol, unit: weightUnit(),
+    sets: _MW.sets.map(s => ({ exName: s.exName, exId: s.exId, reps: s.reps, weight: s.weight }))
+  });
+  saveWorkouts(); markGymHabit(d);
+  _MW = null; closeModal(); render();
 }
 
 /* ---------- Editar actividad ---------- */
@@ -1778,6 +1877,7 @@ function applyBackup(text) {
 function refreshState() {
   CFG = loadCfg(); LOG = loadLog(); TASKS = loadTasks(); WORKOUTS = loadWorkouts(); BIZ = loadBiz();
   migrateExercises();   // un respaldo viejo puede venir sin catálogo
+  migrateLeadUnits();   // los leads de antes no traían unidad
   PROG = store.get("mt_prog") || "semana";
   HOY_ORDER = (() => { let o; try { o = JSON.parse(store.get("mt_hoyOrder")); } catch (e) { o = null; } if (!Array.isArray(o)) o = DEFAULT_HOY_ORDER.slice(); o = o.filter(k => DEFAULT_HOY_ORDER.includes(k)); DEFAULT_HOY_ORDER.forEach(k => { if (!o.includes(k)) o.push(k); }); return o; })();
   buildNav(); render();
@@ -2167,9 +2267,47 @@ function leadRank(l) {
   return 4;
 }
 function nextStage(st) { const i = LEAD_OPEN.indexOf(st); return (i >= 0 && i < LEAD_OPEN.length - 1) ? LEAD_OPEN[i + 1] : "cerrado"; }
-function fmtMoney(v) { const n = Number(v); return (!v || isNaN(n)) ? "" : "$" + Math.round(n).toLocaleString("es-MX"); }
+/* MISMA REGLA que los números del negocio: el valor de un lead lleva su
+   unidad y NUNCA se suma con otra. Lo freelance está en MXN y la inversión
+   de la visa en USD; un total combinado sería un número falso. */
+const LEAD_NO_UNIT = "sin unidad";
+function leadUnit(l) { return ((l && l.unit) || "").trim(); }
+function fmtMoney(v, unit) { const n = Number(v); return (!v && v !== 0) || isNaN(n) ? "" : fmtNum(n, unit); }
 function stageLeads(st) { return BIZ.leads.filter(l => l.stage === st).sort((a, b) => leadRank(a) - leadRank(b) || (a.stageAt || 0) - (b.stageAt || 0)); }
-function sumValue(list) { return list.reduce((a, l) => a + (Number(l.value) || 0), 0); }
+/* No existe un `sumValue` a secas a propósito: un helper que sume todos los
+   valores sin mirar la unidad es justo el error que esta regla evita.
+   Devuelve [{unit, sum}] ordenado de mayor a menor. NUNCA una sola cifra:
+   si la lista mezcla monedas, salen separadas. */
+function leadUnitTotals(list) {
+  const by = {};
+  list.forEach(l => {
+    const v = Number(l.value);
+    if (!l.value && l.value !== 0) return;
+    if (isNaN(v) || !v) return;
+    const u = leadUnit(l) || LEAD_NO_UNIT;
+    by[u] = (by[u] || 0) + v;
+  });
+  return Object.keys(by).map(u => ({ unit: u, sum: by[u] })).sort((a, b) => b.sum - a.sum);
+}
+function unitTotalsText(list) {
+  return leadUnitTotals(list).map(t => fmtNum(t.sum, t.unit === LEAD_NO_UNIT ? "" : t.unit)).join(" · ");
+}
+/* La unidad que más usas: para que un prospecto nuevo no arranque en blanco
+   sin inventarte una moneda que nunca escribiste. */
+function commonLeadUnit() {
+  const c = {};
+  BIZ.leads.forEach(l => { const u = leadUnit(l); if (u) c[u] = (c[u] || 0) + 1; });
+  const ks = Object.keys(c).sort((a, b) => c[b] - c[a]);
+  return ks[0] || "";
+}
+/* Migración aditiva: los leads de antes de esta versión no traen unidad.
+   Se les pone cadena vacía (no se les inventa una moneda). */
+function migrateLeadUnits() {
+  let dirty = false;
+  (BIZ.leads || []).forEach(l => { if (typeof l.unit !== "string") { l.unit = ""; dirty = true; } });
+  if (dirty) saveBiz();
+  return dirty;
+}
 
 /* ---------- Mover de etapa ----------
    Un tap en la fila avanza a la siguiente etapa; ahí mismo se ofrece la
@@ -2216,7 +2354,7 @@ function pickLeadProject(pid) {
 function openLead(id) {
   const editing = !!id, l = editing ? bizLead(id) : null;
   if (editing && !l) return render();
-  const v = l || { name: "", contact: "", stage: "nuevo", value: "", followUp: "", notes: "", projectId: "" };
+  const v = l || { name: "", contact: "", stage: "nuevo", value: "", unit: commonLeadUnit(), followUp: "", notes: "", projectId: "" };
   _leadStage = v.stage; _leadProject = v.projectId || "";
   const proyectos = BIZ.projects.filter(p => p.status === "activo");
   sheet(`<h3>${editing ? "Editar prospecto" : "Nuevo prospecto"}</h3>
@@ -2225,7 +2363,8 @@ function openLead(id) {
     <div class="lbl">Contacto</div><input id="lgContact" class="field" value="${esc(v.contact)}" placeholder="Persona, correo, teléfono...">
     <div class="lbl">Etapa</div><div class="seg small" id="lgStage">${LEAD_STAGES.map(s => `<button data-s="${s}" class="${s === v.stage ? "on" : ""}" onclick="pickLeadStage('${s}')">${cap(s)}</button>`).join("")}</div>
     <div class="row2"><div><div class="lbl">Valor estimado</div><input id="lgValue" class="field" type="number" inputmode="decimal" step="any" value="${esc(v.value === 0 || v.value ? v.value : "")}" placeholder="0"></div>
-      <div><div class="lbl">Seguimiento</div><input id="lgFollow" class="field" type="date" value="${esc(v.followUp || "")}"></div></div>
+      <div><div class="lbl">Moneda / unidad</div><input id="lgUnit" class="field" value="${esc(leadUnit(v))}" placeholder="MXN, USD..."></div></div>
+    <div class="lbl">Seguimiento</div><input id="lgFollow" class="field" type="date" value="${esc(v.followUp || "")}">
     ${proyectos.length ? `<div class="lbl">¿De qué proyecto? (opcional)</div><div class="chips" id="lgProj" style="padding:0">
       <div class="chip ${!_leadProject ? "on" : ""}" data-p="" onclick="pickLeadProject('')" style="${!_leadProject ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">Ninguno</div>
       ${proyectos.map(p => `<div class="chip ${_leadProject === p.id ? "on" : ""}" data-p="${p.id}" onclick="pickLeadProject('${p.id}')" style="${_leadProject === p.id ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">${esc(p.name)}</div>`).join("")}</div>` : ""}
@@ -2244,6 +2383,7 @@ function saveLead(id) {
     contact: document.getElementById("lgContact").value.trim(),
     stage: LEAD_STAGES.indexOf(_leadStage) >= 0 ? _leadStage : "nuevo",
     value: (raw === "" || isNaN(Number(raw))) ? "" : Number(raw),
+    unit: (document.getElementById("lgUnit").value || "").trim(),
     followUp: document.getElementById("lgFollow").value || "",
     notes: document.getElementById("lgNotes").value.trim(),
     projectId: _leadProject || ""
@@ -2271,7 +2411,7 @@ function gotoLead(id) { VIEW = "negocio"; NEGTAB = "pipeline"; buildNav(); rende
 function leadRow(l) {
   const f = followState(l), st = leadStale(l);
   const bits = [];
-  const money = fmtMoney(l.value);
+  const money = fmtMoney(l.value, leadUnit(l));
   if (money) bits.push(`<b style="color:var(--text)">${money}</b>`);
   if (f === "vencido") bits.push(`<span style="color:var(--bad);font-weight:700">seguimiento vencido · ${fmtShort(l.followUp)}</span>`);
   else if (f === "hoy") bits.push(`<span style="color:var(--ingresos);font-weight:700">seguir hoy</span>`);
@@ -2483,6 +2623,35 @@ function saveFocusManual() {
   });
   saveBiz(); closeModal(); render();
 }
+/* Corregir una sesión ya registrada: un minuto mal tecleado no se queda
+   para siempre. */
+function openFocusEdit(id) {
+  const f = BIZ.focus.find(x => x.id === id); if (!f) return;
+  const p = bizProject(f.projectId);
+  sheet(`<h3>Editar sesión de foco</h3><div class="mm">${p ? esc(p.name) + " · " : ""}${cap(fmtDate(f.date))}</div>
+    <div class="row2"><div><div class="lbl">Minutos</div><input id="feMin" class="field" type="number" inputmode="numeric" min="1" value="${Math.max(1, Math.round((f.seconds || 0) / 60))}"></div>
+      <div><div class="lbl">Día</div><input id="feDate" class="field" type="date" max="${today()}" value="${esc(f.date)}"></div></div>
+    <div class="lbl">Nota (opcional)</div><input id="feNote" class="field" value="${esc(f.note || "")}" placeholder="En qué se fue el tiempo">
+    <button class="btn p" onclick="saveFocusEdit('${id}')">Guardar</button>
+    <button class="btn g" style="color:var(--bad)" onclick="confirmDelFocus('${id}')">Borrar sesión</button>
+    <button class="btn g" onclick="${p ? `openBizProject('${p.id}')` : "closeModal()"}">Cancelar</button>`);
+}
+function saveFocusEdit(id) {
+  const f = BIZ.focus.find(x => x.id === id); if (!f) return;
+  const min = parseInt(document.getElementById("feMin").value, 10);
+  if (!min || min <= 0) return;
+  const d = document.getElementById("feDate").value || f.date;
+  f.seconds = min * 60;
+  f.date = d > today() ? today() : d;          // nunca al futuro
+  f.note = document.getElementById("feNote").value.trim();
+  saveBiz(); closeModal(); render();
+}
+function confirmDelFocus(id) {
+  const f = BIZ.focus.find(x => x.id === id); if (!f) return;
+  sheet(`<h3>¿Borrar esta sesión?</h3><div class="mm">${fmtHrs(f.seconds)} del ${cap(fmtDate(f.date))}. Esto no se puede deshacer.</div>
+    <button class="btn p" style="background:var(--bad)" onclick="delFocus('${id}')">Sí, borrar</button>
+    <button class="btn g" onclick="openFocusEdit('${id}')">Cancelar</button>`);
+}
 function delFocus(id) { BIZ.focus = BIZ.focus.filter(f => f.id !== id); saveBiz(); closeModal(); render(); }
 
 /* ========================= REVISIÓN SEMANAL DEL NEGOCIO =========================
@@ -2530,20 +2699,27 @@ function pipelineView() {
   if (fríos) avisos.push(fríos === 1 ? "1 enfriándose" : fríos + " enfriándose");
   let out = `<div class="hero" style="background:linear-gradient(140deg, #3B82F633, var(--card) 70%)">
     <div class="hero-top"><span class="hero-tag" style="color:var(--ciber);background:#3B82F622">${icon("list")} Pipeline</span></div>
-    <div class="hero-title">${fmtMoney(sumValue(abiertos)) || abiertos.length + " en curso"}</div>
-    <div class="hero-sub">${abiertos.length} ${abiertos.length === 1 ? "prospecto abierto" : "prospectos abiertos"}${avisos.length ? " · " + esc(avisos.join(" · ")) : " · todo con su fecha"}</div></div>`;
+    <div class="hero-title">${abiertos.length} ${abiertos.length === 1 ? "prospecto abierto" : "prospectos abiertos"}</div>
+    <div class="hero-sub">${avisos.length ? esc(avisos.join(" · ")) : "Todo con su fecha"}</div></div>`;
+  /* Un recuadro por unidad. Aquí NUNCA puede aparecer una sola cifra que
+     mezcle monedas: cada una vive en su propio stat. */
+  const tot = leadUnitTotals(abiertos);
+  if (tot.length) {
+    out += `<div class="statrow">${tot.slice(0, 3).map(t => `<div class="stat"><b style="color:var(--ciber)">${fmtNum(t.sum, "")}</b><span>${esc(t.unit)}</span></div>`).join("")}</div>`;
+    if (tot.length > 3) out += `<div class="empty" style="text-align:left;padding:4px 6px">${esc(tot.slice(3).map(t => fmtNum(t.sum, "").replace(/<[^>]+>/g, "") + " " + t.unit).join(" · "))}</div>`;
+  }
 
   LEAD_OPEN.forEach(st => {
-    const ls = stageLeads(st), tot = sumValue(ls);
-    out += sec("n_st_" + st, cap(st), `${ls.length}${tot ? " · " + fmtMoney(tot) : ""}`,
+    const ls = stageLeads(st), tt = unitTotalsText(ls);
+    out += sec("n_st_" + st, cap(st), `${ls.length}${tt ? " · " + tt : ""}`,
       ls.length ? ls.map(leadRow).join("") : `<div class="empty">Nada en esta etapa</div>`, "list", LEAD_COLOR[st]);
   });
   out += `<button class="addbtn" onclick="openLead()">${icon("plus")} Nuevo prospecto</button>`;
 
   const cerrados = BIZ.leads.filter(l => !isOpenStage(l.stage)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   if (cerrados.length) {
-    const ganado = sumValue(cerrados.filter(l => l.stage === "cerrado"));
-    out += sec("n_cerr", "Cerrados y perdidos", `${cerrados.length}${ganado ? " · " + fmtMoney(ganado) : ""}`,
+    const ganado = unitTotalsText(cerrados.filter(l => l.stage === "cerrado"));
+    out += sec("n_cerr", "Cerrados y perdidos", `${cerrados.length}${ganado ? " · " + ganado : ""}`,
       cerrados.map(leadRow).join(""), "trophy", "var(--muted)");
   }
   return out;
@@ -2596,7 +2772,8 @@ function focusSummaryBlock(id) {
   return `<div class="lbl">Foco</div>
     <div class="statrow"><div class="stat"><b>${fmtHrs(sem)}</b><span>esta semana</span></div>
       <div class="stat"><b style="color:var(--text)">${fmtHrs(tot)}</b><span>en total</span></div></div>
-    ${ses.map(f => `<div class="catrow"><span>${cap(fmtShort(f.date))}${f.note ? " · " + esc(f.note) : ""}</span><span class="amt">${fmtHrs(f.seconds)}</span></div>`).join("")}`;
+    ${ses.map(f => `<div class="catrow" style="cursor:pointer" onclick="openFocusEdit('${f.id}')"><span>${cap(fmtShort(f.date))}${f.note ? " · " + esc(f.note) : ""}</span><span class="amt">${fmtHrs(f.seconds)} ${icon("chevright")}</span></div>`).join("")}
+    ${ses.length ? `<div class="empty" style="text-align:left;padding:2px 2px 0">Toca una sesión para corregirla o borrarla.</div>` : ""}`;
 }
 
 /* ---------- Deshacer un "Listo" ----------

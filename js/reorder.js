@@ -136,6 +136,7 @@ function syncNavHeight() {
 /* ---------- Init de la app ---------- */
 freezePastDays();
 migrateExercises();   // catálogo de ejercicios: idempotente, solo agrega
+migrateLeadUnits();   // unidad por lead: aditiva, no inventa moneda
 buildNav();
 render();
 initSwipeHoy();

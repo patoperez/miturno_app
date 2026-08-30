@@ -1,5 +1,5 @@
 /* Service worker · Mi Turno · offline básico (cache-first) */
-const CACHE = "mi-turno-v25";
+const CACHE = "mi-turno-v26";
 const ASSETS = [
   "./",
   "./index.html",
@@ -37,9 +37,16 @@ self.addEventListener("push", e => {
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || "./index.html";
+  const d = e.notification.data || {};
+  const url = d.url || "./index.html";
   e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(cl => {
-    for (const c of cl) { if ("focus" in c) return c.focus(); }
+    for (const c of cl) {
+      if ("focus" in c) {
+        // Aviso de descanso: pedirle al cliente que vuelva al reproductor.
+        if (d.resume && c.postMessage) { try { c.postMessage({ type: "mt-resume-workout" }); } catch (_) {} }
+        return c.focus();
+      }
+    }
     if (clients.openWindow) return clients.openWindow(url);
   }));
 });

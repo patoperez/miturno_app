@@ -54,7 +54,7 @@ Almacén propio, **aparte de `CFG`**: son datos, no configuración. `loadBiz()` 
 ```
 BIZ
   projects[]  {id, name, color, status, why, nextAction, nextActionDue, updatedAt}
-  leads[]     {id, name, contact, stage, value, followUp, notes, projectId, stageAt, updatedAt}
+  leads[]     {id, name, contact, stage, value, unit, followUp, notes, projectId, stageAt, updatedAt}
   done[]      {id, projectId, text, doneAt}
   metrics[]   {id, name, unit, target, period}          period: "semana" | "mes"
   mvals{}     {metricId: {periodKey: número}}           "2026-W35" o "2026-08"
@@ -106,7 +106,7 @@ Lo único que importa es la velocidad de captura: si toma más de tres segundos,
 - El cronómetro es **por marca de tiempo**, igual que el descanso del reproductor de gym: se guarda `startedAt` y el transcurrido se recalcula con `Date.now()` (`focusElapsed`). Un `setInterval` que suma de a uno se congela cuando se bloquea la pantalla o la app pasa a segundo plano y devolvería basura. **El intervalo aquí solo repinta el texto; la verdad siempre es el reloj.**
 - La sesión en curso se persiste en `mt_focusRun`, así que sobrevive a cerrar la app. `getFocusRun()` devuelve `null` si el proyecto ya no existe, para no dejar sesiones huérfanas.
 - Un `visibilitychange` repinta al volver de segundo plano. `armFocusTimer()` se llama al final de `renderNegocio`.
-- También se puede registrar a mano (`openFocusManual`) para cuando se olvidó arrancarlo.
+- También se puede registrar a mano (`openFocusManual`) para cuando se olvidó arrancarlo, y **corregirlo después**: tocar una sesión en el detalle del proyecto abre `openFocusEdit` (minutos, día y nota), con borrado confirmado. Una sesión nunca queda en el futuro.
 - `focusSeconds(projectId, desde)` y `focusWeek(projectId)` alimentan el detalle del proyecto y la tarjeta de foco.
 
 ### Revisión semanal del negocio (`reviews{}`)
@@ -122,13 +122,22 @@ Lo que genera ingreso y lo que más fácil se olvida. Un lead que lleva días en
 - `followState(l)` compara `followUp` con `today()` como texto: `vencido` (rojo, `.row.leadvenc` con barra roja a la izquierda), `hoy` (verde) o `futuro`. Un cerrado o perdido ya no se persigue: devuelve `null`.
 - `leadRank(l)` ordena igual que los proyectos: **0** vencido, **1** hoy, **2** sin fecha, **3** enfriándose, **4** el resto.
 - **Avanzar es un tap** desde la fila (`advanceLead` → `nextStage`), y ahí mismo se ofrece la próxima fecha con atajos de un tap (`pickFollow`: mañana / 3 días / 1 semana / 2 semanas), igual que completar una acción pregunta por la siguiente. Llegar a `cerrado` no pide seguimiento.
-- `value` se guarda como número o cadena vacía, nunca `NaN`. Cada etapa muestra conteo y suma (`sumValue`).
+- `value` se guarda como número o cadena vacía, nunca `NaN`, y **lleva su propia `unit`** (texto libre: MXN, USD...). **Aplica la misma regla de moneda que los números del negocio: nunca se suman unidades distintas.** `leadUnitTotals(list)` devuelve `[{unit, sum}]` y `unitTotalsText(list)` lo escribe; el hero pinta un `.stat` por unidad. **No existe un `sumValue` a secas a propósito** — un helper que sume sin mirar la unidad es justo el error que esto evita. Un lead sin unidad cae en su propio grupo (`LEAD_NO_UNIT`), no se mezcla.
+- `migrateLeadUnits()` es aditiva e idempotente: a los leads de antes les pone `unit: ""`. **No les inventa una moneda.** El formulario de alta propone la unidad que más usas (`commonLeadUnit()`), vacía si aún no hay ninguna.
+- El valor se muestra con `fmtNum` (`25,000 MXN`), sin `$`: con varias monedas el símbolo es ambiguo.
 - La pestaña Negocio tiene un control segmentado **Proyectos / Pipeline / Números / Ideas** (`NEGTAB`, en memoria: no agrega ninguna clave `mt_*`). Pipeline muestra en rojo los seguimientos vencidos e Ideas en ámbar los de la bandeja. La revisión semanal del negocio se pinta **arriba** del control, porque no pertenece a ninguna pestaña.
 
 ## Datos de entrenamiento (`WORKOUTS`, clave `mt_workouts`)
 Array de sesiones. Fuerza: `{id,date,activityId,type:"strength",routineId,name,duration,volume,unit,sets:[{exName,exId,reps,weight}]}` — **una entrada por serie** en `sets`. Clase: `{id,date,activityId,type:"class",name,duration,intensity,notes}`.
 Cada serie lleva **`exId`** (el ejercicio del catálogo) y **conserva `exName`**: el texto tal como se registró. `exName` **no se borra nunca** — es respaldo para resolver series heredadas y hace el JSON legible a ojo. Se agrega por `exId`, así que dos grafías del mismo ejercicio ya **no** parten el historial.
 El entreno en curso se persiste aparte en `mt_activeWorkout` (permite reanudar, reiniciar, finalizar o descartar).
+
+**Se puede registrar un entreno de cualquier día pasado.** El resto de la app deja corregir el pasado (VDAY, días congelados editables); los entrenos no eran la excepción por diseño sino por omisión.
+- Fuerza a mano: `openManualWorkout(fecha)` — día, rutina (o ninguna), duración y series. Se agregan varias series iguales de un jalón (4×8 a 60 kg es una sola alta). **Cada serie pasa por `findOrCreateExercise`**, así que trae `exId` y alimenta records, historial y estadísticas exactamente igual que una sesión en vivo.
+- Clases: `openLogSession(actId, fecha)` ya acepta fecha y ahora la muestra como campo.
+- Entradas: la pestaña Workouts y la tarjeta de Workouts de un **día pasado** en Hoy.
+- **Nunca al futuro:** `clampPast(d)` recorta cualquier fecha posterior a hoy, y los `<input type="date">` llevan `max`.
+- `markGymHabit(d)` marca el hábito de gym de **ese** día y llama a `recalcDay(d)`: un día pasado está congelado, así que sin recalcular el puntaje no se movería. Lo usan las tres rutas (en vivo, finalizar y manual).
 Al registrar una serie, el reproductor compara contra el PR guardado **y** contra lo mejor de la sesión en curso; si lo supera, muestra "¡Nuevo record!" (`.pl-pr`) sin interrumpir nada, y lo resume al terminar.
 
 ## Reglas / convenciones
@@ -145,6 +154,14 @@ Al registrar una serie, el reproductor compara contra el PR guardado **y** contr
 
 ## IMPORTANTE — caché del service worker
 La estrategia es **red primero** para los archivos propios, así que con internet la app instalada suele traer lo último al abrir. Aun así, **siempre incrementa `const CACHE = "mi-turno-vN"` al siguiente número** en cualquier cambio de HTML/CSS/JS: es lo que invalida la caché vieja, refresca la lista de precache y garantiza que el dispositivo no siga sirviendo una versión anterior en modo offline. Si el iPhone sigue mostrando algo viejo: cerrar por completo y reabrir; si persiste, quitar de la pantalla de inicio y volver a agregar (limpia el caché del SW).
+
+## Aviso de fin de descanso (local, NO push)
+Cuando el temporizador de descanso llega a cero, además de la alarma (sonido, vibración y pantalla) se dispara una **notificación LOCAL** por el service worker: `navigator.serviceWorker.getRegistration().then(reg => reg.showNotification(...))`, con el texto "Descanso terminado · Serie X de Y · &lt;ejercicio&gt;".
+- **NO pasa por Supabase ni por Web Push.** El descanso dura segundos y vive en este dispositivo; mandarlo al servidor agregaría latencia y complejidad sin ganar nada. `js/gym.js` no debe tocar `pushManager`, `fetch` ni el cliente de Supabase — hay una prueba que lo verifica.
+- **Degrada en silencio:** si `Notification.permission` no es `"granted"`, no se hace nada y queda la alarma de siempre. **Nunca** se pide permiso a media serie.
+- `PLAYER.restNotified` evita avisos duplicados y **se persiste en `mt_activeWorkout`**, así que recargar la app no vuelve a avisar del mismo descanso. Se limpia al empezar cada descanso.
+- **Puesta al día por el estrangulamiento de iOS:** una PWA en segundo plano puede tener sus timers frenados o congelados, así que `tick` quizá nunca corra. El manejador de `visibilitychange` recalcula contra el reloj real y, si el descanso ya venció, llama a `restExpired()` y marca `restNotified` **sin** soltar un aviso tardío de algo que el usuario ya está viendo en pantalla.
+- Tocar la notificación enfoca la app y el service worker le manda `{type:"mt-resume-workout"}` al cliente; `gym.js` lo escucha y vuelve al reproductor (o lo reanuda desde `mt_activeWorkout` si la página se recargó).
 
 ## Nube y notificaciones (`js/sync.js`)
 - Supabase con login correo+contraseña. Sincroniza el blob de `localStorage` a la tabla `app_state` (last-write-wins por `mt_updated`). **Local-first**: si no hay sesión, red ni `supabase-js`, la app funciona igual y `sync.js` degrada en silencio.
@@ -208,6 +225,7 @@ Dos detalles del harness: el stub de elemento necesita `getContext()` para los `
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
+Para estos arreglos: que un total de leads **nunca** junte dos unidades, que un entreno con fecha pasada caiga en el día correcto y alimente PRs/historial/estadísticas/hábito, que una fecha futura se recorte, y que editar o borrar una sesión de foco persista.
 Para Negocio: que restaurar una acción hecha la devuelva y pregunte al pisar otra, que las claves de periodo semanal y mensual sean correctas en el cambio de año, que dos números con unidades distintas **nunca** se sumen, que una idea se capture y persista, que una sesión de foco sobreviva un segundo plano simulado (mover `startedAt` hacia atrás) y registre la duración correcta, que la revisión escriba en el domingo correcto tanto desde domingo como desde lunes, que crear/editar/borrar un proyecto o un lead persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar (con `leads` y `done` dentro), que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, que avanzar de etapa mueva `stageAt`, que el conteo semanal no cuente lo del domingo anterior, y que Hoy se pinte con cero proyectos, con cero leads y con varios de ambos.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.
 

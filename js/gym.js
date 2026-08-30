@@ -133,7 +133,7 @@ function getActiveWorkout() {
 }
 function savePlayerState() {
   if (!PLAYER) return;
-  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx, prs: PLAYER.prs || [] }));
+  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx, prs: PLAYER.prs || [], restNotified: !!PLAYER.restNotified }));
 }
 function clearActive() { store.set("mt_activeWorkout", ""); }
 
@@ -151,7 +151,7 @@ function beginWorkout(rid) {
 function resumeWorkout() {
   const a = getActiveWorkout(); if (!a) return render();
   const r = CFG.routines.find(x => x.id === a.rid); if (!r) { clearActive(); return render(); }
-  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx, prs: a.prs || [], pr: null };
+  PLAYER = { r, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx, prs: a.prs || [], pr: null, restNotified: !!a.restNotified };
   // Si estaba descansando: continúa el conteo real; si ya venció mientras no estabas, suena la alarma.
   if (PLAYER.phase === "rest" || PLAYER.phase === "alarm") {
     if (PLAYER.restEnd && restLeft() > 0) { PLAYER.phase = "rest"; PLAYER.timer = setInterval(tick, 500); }
@@ -367,15 +367,45 @@ function startRest() {
   const P = PLAYER, ex = P.r.exercises[P.ei];
   primeAudio(); // el tap del usuario habilita el sonido de la alarma
   logCurrentSet();
-  P.phase = "rest"; P.restEnd = Date.now() + ex.rest * 1000; P.si++;
+  P.phase = "rest"; P.restEnd = Date.now() + ex.rest * 1000; P.si++; P.restNotified = false;
   clearInterval(P.timer); P.timer = setInterval(tick, 500); renderPlayer();
+}
+/* ---------- Aviso local de fin de descanso ----------
+   Notificación LOCAL por el service worker, NO push de servidor: el
+   descanso dura segundos y vive en este dispositivo; pasarlo por Supabase
+   agregaría latencia y complejidad sin ganar nada.
+   Degrada en silencio si no hay permiso: jamás se pide permiso a media
+   serie ni se bloquea el entreno por esto. */
+function notifyRestDone() {
+  const P = PLAYER;
+  if (!P || P.restNotified) return;
+  P.restNotified = true;            // se marca siempre: nunca dos avisos del mismo descanso
+  savePlayerState();
+  try {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistration) return;
+    const ex = P.r.exercises[P.ei];
+    const cuerpo = "Serie " + P.si + " de " + ex.sets + " · " + exName(curExId(ex), ex.name);
+    navigator.serviceWorker.getRegistration().then(reg => {
+      if (!reg || !reg.showNotification) return;
+      reg.showNotification("Descanso terminado", {
+        body: cuerpo, icon: "./icons/icon-192.png", badge: "./icons/icon-192.png",
+        tag: "mt-rest", renotify: true, data: { url: "./index.html", resume: true }
+      });
+    }).catch(() => {});
+  } catch (e) { /* sin notificaciones: se queda la alarma de siempre */ }
+}
+function restExpired() {
+  const P = PLAYER; if (!P) return;
+  clearInterval(P.timer); P.timer = null;
+  P.phase = "alarm"; startAlarm(); renderPlayer();
 }
 function tick() {
   const P = PLAYER; if (!P) return;
   if (P.phase !== "rest") return;
   const left = restLeft();
   const el = document.getElementById("ptime"); if (el) el.textContent = fmtTime(left);
-  if (left <= 0) { clearInterval(P.timer); P.timer = null; P.phase = "alarm"; startAlarm(); renderPlayer(); }
+  if (left <= 0) { notifyRestDone(); restExpired(); }
 }
 function addRest(s) {
   const P = PLAYER; if (!P.restEnd) return;
@@ -386,11 +416,17 @@ function addRest(s) {
 function skipRest() { const P = PLAYER; clearInterval(P.timer); P.timer = null; P.restEnd = null; stopAlarm(); P.phase = "set"; P.pr = null; renderPlayer(); }
 /* Al volver a la app: recalcula el tiempo transcurrido en segundo plano */
 if (typeof document !== "undefined") {
+  /* iOS estrangula (o congela) los timers de una PWA en segundo plano, así
+     que `tick` puede no haber corrido nunca. Al volver se recalcula contra
+     el reloj real y, si el descanso ya venció, se atiende de inmediato.
+     `restNotified` se marca igual para no soltar un aviso tardío de un
+     descanso que el usuario ya está viendo en pantalla. */
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !PLAYER) return;
     if (PLAYER.phase === "rest") {
-      if (restLeft() <= 0) { clearInterval(PLAYER.timer); PLAYER.timer = null; PLAYER.phase = "alarm"; startAlarm(); }
-      renderPlayer();
+      if (restLeft() <= 0) { PLAYER.restNotified = true; restExpired(); }
+      else renderPlayer();
+      return;
     }
   });
 }
@@ -416,3 +452,13 @@ function cleanupPlayer() {
   PLAYER = null; closeModal();
 }
 function closePlayer() { if (PLAYER) savePlayerState(); cleanupPlayer(); render(); }
+
+/* Tocar la notificación enfoca la app; el service worker avisa aquí para
+   volver al reproductor aunque la página se haya recargado. */
+if (typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
+  navigator.serviceWorker.addEventListener("message", e => {
+    if (!e.data || e.data.type !== "mt-resume-workout") return;
+    if (PLAYER) { renderPlayer(); return; }
+    if (getActiveWorkout()) resumeWorkout();
+  });
+}
