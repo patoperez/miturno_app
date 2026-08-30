@@ -1,8 +1,8 @@
-# CLAUDE.md — Mi Turno
+# AGENTS.md — Mi Turno
 
 Contexto del proyecto para agentes de código.
 
-> `AGENTS.md` es una copia idéntica de este archivo (salvo el título). **Si actualizas uno, actualiza el otro.**
+> `CLAUDE.md` es una copia idéntica de este archivo (salvo el título). **Si actualizas uno, actualiza el otro.**
 
 ## Qué es
 App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, comidas, tareas/calendario, workouts y progreso. Vanilla **HTML/CSS/JS puro**: sin framework, sin bundler, sin paso de build.
