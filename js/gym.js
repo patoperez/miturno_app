@@ -41,7 +41,7 @@ function renderRoutineEditor() {
           <span class="idi" style="background:${col}22;color:${col}">${i + 1}</span>
           <div class="body"><div class="name">${esc(e.name || "Ejercicio")}</div>
             <div class="sub">${exTargetText(e)} · descanso ${e.rest}s</div></div>
-          <button class="note-btn" onclick="event.stopPropagation();openMoveExercise(${bi},${i})">${icon("chevron")}</button>
+          <button class="note-btn" aria-label="Mover" onclick="event.stopPropagation();openMoveExercise(${bi},${i})">${icon("chevright")}</button>
           <button class="note-btn" onclick="event.stopPropagation();delExercise(${bi},${i})">${icon("trash")}</button></div>`).join("")
       : `<div class="empty">Bloque vacío</div>`;
     return `<div class="blk">
@@ -465,12 +465,16 @@ function logCurrentSet(overrideSecs) {
      contra lo ya hecho en esta misma sesión, para no celebrar dos veces. */
   const kind = isTime ? "tiempo" : (bw ? "reps" : "peso");
   const val = isTime ? secs : (bw ? parseInt(reps, 10) : parseFloat(weight));
+  /* En calentamiento y enfriamiento NO se celebran records: aguantar 20s de
+     movilidad no es una marca, y el aviso solo hace ruido. */
+  const paso = planStep(P);
+  const celebra = !paso || (paso.bkind !== "calentamiento" && paso.bkind !== "enfriamiento");
   const stored = exPRInfo(id);
   const storedVal = (stored && stored.kind === kind) ? Number(stored.value) : -Infinity;
   const sb = sessionBestBy(id, kind);
   const prev = Math.max(storedVal, sb === null ? -Infinity : sb);
   P.pr = null;
-  if (!isNaN(val) && val > 0 && val > prev) {
+  if (celebra && !isNaN(val) && val > 0 && val > prev) {
     P.pr = {
       name: exName(id, ex.name), kind: kind,
       label: isTime ? fmtSecs(val) : (bw ? val + " reps" : weight + " " + weightUnit() + (reps ? " × " + reps : "")),
@@ -510,7 +514,7 @@ function renderPlayer() {
     const last = P.si >= ex.sets, pf = prefillFor(ex), lp = lastPerf(curExId(ex));
     const isTime = exIsTime(ex), bw = exIsBw(ex);
     const objetivo = isTime ? `objetivo: ${fmtSecs(exSeconds(ex))}` : `objetivo: ${esc(ex.reps)} reps${bw ? " · peso corporal" : (ex.weight ? " · " + esc(ex.weight) : "")}`;
-    const campos = isTime ? "" : `<div class="pl-log">${bw ? "" : `<div><label>Peso (${U})</label><input id="plW" inputmode="decimal" value="${esc(pf.weight)}" placeholder="—"></div>`}
+    const campos = isTime ? "" : `<div class="pl-log${bw ? " one" : ""}">${bw ? "" : `<div><label>Peso (${U})</label><input id="plW" inputmode="decimal" value="${esc(pf.weight)}" placeholder="—"></div>`}
         <div><label>Reps</label><input id="plR" inputmode="numeric" value="${esc(pf.reps)}" placeholder="${esc(ex.reps)}"></div></div>`;
     const ultima = lp ? `<div class="pl-last">Última vez: ${lp.secs ? fmtSecs(lp.secs) : `${esc(lp.weight) || "—"}${bw ? "" : " " + U} × ${esc(lp.reps) || "—"}`}</div>` : "";
     body = `<div class="pl-mid">
@@ -548,7 +552,7 @@ function renderPlayer() {
       <div class="pl-next">Sigue: Serie ${P.si} de ${ex.sets} · ${esc(ex.name)}</div>
       ${isTime ? `<div class="pl-logrest"><div class="pl-logtitle">Serie anterior · ${fmtSecs(s.secs || 0)}</div></div>`
         : `<div class="pl-logrest"><div class="pl-logtitle">Serie anterior · puedes ajustarla</div>
-        <div class="pl-log">${bw ? "" : `<div><label>Peso (${U})</label><input inputmode="decimal" value="${esc(s.weight)}" placeholder="—" onchange="editLoggedSet('weight',this.value)"></div>`}
+        <div class="pl-log${bw ? " one" : ""}">${bw ? "" : `<div><label>Peso (${U})</label><input inputmode="decimal" value="${esc(s.weight)}" placeholder="—" onchange="editLoggedSet('weight',this.value)"></div>`}
           <div><label>Reps</label><input inputmode="numeric" value="${esc(s.reps)}" placeholder="—" onchange="editLoggedSet('reps',this.value)"></div></div></div>`}
     </div>
     <div class="pl-actions"><div class="pl-restctl"><button onclick="addRest(-15)">-15s</button><button onclick="addRest(15)">+15s</button><button onclick="skipRest()">${icon("skipfwd")} Saltar</button></div></div>`;

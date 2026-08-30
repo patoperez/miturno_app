@@ -30,7 +30,7 @@ App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, com
 - `settings` — `{userName, mealView:"menu"|"fichas", unit:"kg"|"lb", notif:{enabled, morning/midday/night:{on,time}}}`. `unit` se elige desde Workouts, no desde Ajustes.
 - `meals` — `{menu:[{id,name,desc}], fichas:{categories:[{id,name,quota,color}], catalog:{catId:[{food,amount,note}]}, innegociables:[{id,name}]}}`. Solo se muestra el sistema activo (`settings.mealView`).
 - `activities[]` — `{id,name,type,icon,color}`. `type:"strength"` usa el reproductor de rutinas; `type:"class"` se registra por sesión (duración + intensidad + notas).
-- `routines[]` — `{id,name,days:[],exercises:[{id,exId,name,sets,reps,rest,weight,note}]}`. `id` identifica la fila dentro de la rutina; **`exId` apunta al catálogo** y es lo que une el historial. `name` es solo la etiqueta que se muestra (se copia del nombre canónico del catálogo).
+- `routines[]` — `{id, name, days:[], blocks:[...]}`. **Una sesión tiene PARTES**, no una lista plana. Ver "Rutinas por bloques".
 - `exercises[]` — **el catálogo**: `{id, name, aliases:[]}`. Ver "Catálogo de ejercicios".
 - `exDismissed[]` — pares `"idA|idB"` que el usuario ya marcó como NO duplicados, para no volver a proponerlos.
 - `LOG[d].review` — `{worked, failed, change}`. La tarjeta se renderiza domingo y lunes (`reviewDateFor`), pero **siempre escribe sobre el domingo que cerró la semana**: el lunes edita el mismo registro, no crea uno nuevo. Se lee después en Bitácora.
@@ -47,6 +47,50 @@ App personal (PWA instalable en iPhone) de identidad, hábitos, compromisos, com
 - **Renombrar** no toca el historial: se agrega por id. El nombre anterior queda como alias automáticamente, así que una importación con el nombre viejo sigue cayendo en el mismo ejercicio. Renombrar a un nombre que ya existe se rechaza (`"clash"`): hay que fusionar, no duplicar.
 - **Fusionar** (`mergeExercises(keepId, dropId)`) mueve las series y las rutinas al id que sobrevive y deja el nombre perdedor (y sus alias) como alias. **No borra ningún entreno ni ninguna serie.**
 - **Duplicados**: `dupCandidates()` solo **propone**, nunca fusiona sola. Dos señales, basta una: solape de tokens (Jaccard ≥ 0.7, sin conectores y con el plural recortado) o errata (mismo número de palabras y ≤ 1 carácter de diferencia en total, alineadas por posición). **No se usa distancia de edición sobre la cadena completa**: sobre nombres largos es engañosa — "Enfriamiento · Estiramientos (PUSH)" y "... (PULL)" se parecen 94% carácter a carácter y son ejercicios distintos. El usuario confirma o rechaza cada par en la tarjeta "Posibles duplicados" de Workouts.
+
+## Rutinas por bloques
+Una sesión no es un montón de ejercicios: es calentamiento, trabajo principal, extras (abdomen, cuello) y enfriamiento. El abdomen **no** es una sobra pegada al final, es su propia parte.
+
+```
+routine
+  id, name, days[]
+  blocks[]  {id, name, kind, exercises[]}
+```
+- `kind` ∈ **`calentamiento` | `principal` | `extra` | `enfriamiento`** (`BLOCK_KINDS`). Manda el comportamiento y el color (`BLOCK_COLOR`).
+- `name` es **texto libre y es lo que se lee**. Por eso puede haber dos bloques `extra` llamados "Abdomen" y "Cuello": se leen como secciones distintas, no como sobras. Si un `kind` no se reconoce, cae en `principal`.
+- **`routineBlocks(r)`** siempre devuelve bloques, incluso si la rutina todavía no migró; **`routineExercises(r)`** los aplana en orden. **Usa siempre estas dos, nunca `r.exercises` directo.**
+- **`migrateRoutineBlocks()`** es aditiva e idempotente: una rutina plana pasa a tener un único bloque `principal` con **los mismos objetos** de ejercicio, así que no se pierde ni un `exId` ni una nota. Corre en el init y en `refreshState()`.
+
+### El ejercicio dentro del bloque
+`{id, exId, name, type, seconds, bodyweight, sets, reps, rest, weight, note}`
+- **`type`** ∈ `"reps"` (por defecto) | `"tiempo"`. Con `"tiempo"` el reproductor cuenta el **intervalo de trabajo** hacia atrás y registra `secs` en vez de reps.
+- **`seconds`** es la duración de la serie cuando `type` es `"tiempo"` (30 por defecto).
+- **`bodyweight: true`** quita el campo de peso: basta con las reps.
+- **`type` y `bodyweight` son de ESTA definición, NO del catálogo.** El catálogo (`exId`, alias, fusionar/renombrar) identifica al ejercicio y **no se fragmenta** por esto: el mismo ejercicio puede ir con peso en una rutina y a peso corporal en otra.
+- Helpers: `exType`, `exIsTime`, `exIsBw`, `exSeconds`, `exTargetText`, `fmtSecs`.
+
+### El record sigue a la medida
+`exPRInfo(id)` devuelve `{kind, label, value, date}` según lo que **realmente se registró**:
+
+| El ejercicio es… | Su record es… |
+| --- | --- |
+| normal | el **peso** más alto (`exercisePR`) |
+| peso corporal | las **reps** más altas (`exBestReps`) |
+| por tiempo | el **aguante** más largo (`exBestTime`) |
+
+**Nunca se reporta un record de peso para algo sin peso**: `exercisePR` devuelve `null` si ninguna serie trae peso. `allLoggedExercises()` incluye los tres tipos — filtrar solo por peso dejaba fuera a la plancha y a las dominadas.
+En **calentamiento y enfriamiento no se celebran records**: aguantar 20s de movilidad no es una marca, solo haría ruido.
+
+### El reproductor entiende la estructura
+- `buildPlan(r)` arma los pasos aplanados; cada uno sabe a qué bloque pertenece (`bi`, `bname`, `bkind`, `n`, `of`). Es **derivado**: se reconstruye al arrancar y al reanudar, no se persiste. `P.ei` sigue indexando el plan.
+- La cabecera muestra **en qué parte de la sesión vas** (chip del bloque + `n/of`), no "ejercicio 3 de 14".
+- Fase **`blockdone`**: terminar un bloque es un momento distinto a terminar un ejercicio (`transition`). Nunca arranca solo: siempre espera el tap.
+- Un ejercicio por tiempo pasa por `set` → **`work`** → **`workalarm`**. El cronómetro de trabajo usa **la misma maquinaria que el descanso**: por marca de tiempo (`workEnd`), el mismo `tick`, la misma alarma y la misma notificación local del service worker. `workEnd` se persiste en `mt_activeWorkout` y el `visibilitychange` también lo pone al día.
+
+### Formato JSON (importar / exportar)
+- El importador acepta **los dos formatos**: el nuevo con `blocks[]` y el viejo plano con `exercises[]` (que entra como un único bloque `principal`). Nada de lo que ya existe se rompe.
+- **Exportar produce siempre el formato nuevo.** Los campos en su valor por defecto no se escriben, para que el JSON siga siendo legible.
+- La documentación completa, con un ejemplo de sesión con los cinco bloques, está en `RUTINAS-como-importar-json.md`. Los ejemplos públicos son `ejemplo-rutina.json` y `mi-rutina-PPL.json` — **son públicos: nada personal ahí**.
 
 ## Negocio (`BIZ`, clave `mt_biz`)
 Almacén propio, **aparte de `CFG`**: son datos, no configuración. `loadBiz()` / `saveBiz()` siguen el mismo patrón que `LOG`/`TASKS`/`WORKOUTS`.
@@ -124,6 +168,7 @@ Lo que genera ingreso y lo que más fácil se olvida. Un lead que lleva días en
 - **Avanzar es un tap** desde la fila (`advanceLead` → `nextStage`), y ahí mismo se ofrece la próxima fecha con atajos de un tap (`pickFollow`: mañana / 3 días / 1 semana / 2 semanas), igual que completar una acción pregunta por la siguiente. Llegar a `cerrado` no pide seguimiento.
 - `value` se guarda como número o cadena vacía, nunca `NaN`, y **lleva su propia `unit`** (texto libre: MXN, USD...). **Aplica la misma regla de moneda que los números del negocio: nunca se suman unidades distintas.** `leadUnitTotals(list)` devuelve `[{unit, sum}]` y `unitTotalsText(list)` lo escribe; el hero pinta un `.stat` por unidad. **No existe un `sumValue` a secas a propósito** — un helper que sume sin mirar la unidad es justo el error que esto evita. Un lead sin unidad cae en su propio grupo (`LEAD_NO_UNIT`), no se mezcla.
 - `migrateLeadUnits()` es aditiva e idempotente: a los leads de antes les pone `unit: ""`. **No les inventa una moneda.** El formulario de alta propone la unidad que más usas (`commonLeadUnit()`), vacía si aún no hay ninguna.
+- **La unidad se compara normalizada** (`unitKey`, el mismo `exKey` de los ejercicios): `"usd"`, `"USD"` y `" Usd "` son la MISMA cubeta y no abren dos totales. Se conserva la grafía que escribiste; `canonicalLeadUnit()` reusa la que ya tenías y `knownLeadUnits()` lista las usadas.
 - El valor se muestra con `fmtNum` (`25,000 MXN`), sin `$`: con varias monedas el símbolo es ambiguo.
 - La pestaña Negocio tiene un control segmentado **Proyectos / Pipeline / Números / Ideas** (`NEGTAB`, en memoria: no agrega ninguna clave `mt_*`). Pipeline muestra en rojo los seguimientos vencidos e Ideas en ámbar los de la bandeja. La revisión semanal del negocio se pinta **arriba** del control, porque no pertenece a ninguna pestaña.
 
@@ -136,7 +181,8 @@ El entreno en curso se persiste aparte en `mt_activeWorkout` (permite reanudar, 
 - Fuerza a mano: `openManualWorkout(fecha)` — día, rutina (o ninguna), duración y series. Se agregan varias series iguales de un jalón (4×8 a 60 kg es una sola alta). **Cada serie pasa por `findOrCreateExercise`**, así que trae `exId` y alimenta records, historial y estadísticas exactamente igual que una sesión en vivo.
 - Clases: `openLogSession(actId, fecha)` ya acepta fecha y ahora la muestra como campo.
 - Entradas: la pestaña Workouts y la tarjeta de Workouts de un **día pasado** en Hoy.
-- **Nunca al futuro:** `clampPast(d)` recorta cualquier fecha posterior a hoy, y los `<input type="date">` llevan `max`.
+- **Nunca al futuro, y se RECHAZA en vez de recortar:** `validPast(d)` devuelve `null` si la fecha es futura o vacía, y el alta avisa en rojo sin guardar. Escribir un entreno en el día equivocado es peor que un error visible. `clampPast` quedó solo para el valor inicial de un formulario. Aplica al alta manual, a las clases y a editar una sesión de foco.
+- El alta manual también deja **editar** una serie ya agregada (`openMwEdit`), no solo borrarla, y acepta series por tiempo (`secs`).
 - `markGymHabit(d)` marca el hábito de gym de **ese** día y llama a `recalcDay(d)`: un día pasado está congelado, así que sin recalcular el puntaje no se movería. Lo usan las tres rutas (en vivo, finalizar y manual).
 Al registrar una serie, el reproductor compara contra el PR guardado **y** contra lo mejor de la sesión en curso; si lo supera, muestra "¡Nuevo record!" (`.pl-pr`) sin interrumpir nada, y lo resume al terminar.
 
@@ -151,6 +197,12 @@ Al registrar una serie, el reproductor compara contra el PR guardado **y** contr
 - **Local-first:** los datos viven en `localStorage` bajo claves `mt_*` (`mt_cfg`, `mt_log`, `mt_tasks`, `mt_workouts`, `mt_biz`, `mt_prog`, `mt_hoyOrder`, `mt_todayRoutine`, `mt_activeWorkout`, `mt_updated`, `mt_swipeHint`). Las fotos de metas viven en **IndexedDB** (db `miturno`, store `photos`), NO en localStorage. La nube (Supabase, tabla `app_state`) sincroniza el blob de `localStorage` con last-write-wins.
 - Historial inmutable **ante cambios de config**: los días pasados se "congelan" (`LOG[d].frozen/pts/max`), así que agregar o quitar hábitos no reescribe el pasado. Pero editar un día a propósito **sí** mueve su puntaje: toda mutación de un día (`toggleHabit`, `toggleCommit`, `toggleMenu`, `setFicha`, `toggleInneg`, guardar/quitar métrica, `setSleep`, `setMood`, `setJournal`) llama a `recalcDay(d)`, que recalcula **solo `pts`** con `rawPoints(d)`. `rawPoints(d)` es la **única** definición de la fórmula (hábitos + compromisos + `mealScore`) y la comparte con `pointsFor`, para que congelado y no congelado nunca diverjan. En un día no congelado `recalcDay` no hace nada: ahí `pointsFor` ya calcula en vivo.
 - **`max` NUNCA encoge.** `max` es el denominador que regía **ese** día, no el de hoy. `recalcDay` hace `l.max = Math.max(l.max || maxPts(), l.pts)`: solo puede crecer, y nunca queda por debajo de los puntos del propio día. Si se pisara con `maxPts()`, borrar hábitos encogería el denominador mientras las marcas viejas siguen en `LOG[d].habits`, y el día pasaría a leerse 3/2 = **150%**. Como red extra, `maxFor(d)` devuelve al menos `pointsFor(d)`, así **ninguna vista puede pintar más de 100%** ni siquiera con historiales que ya quedaron torcidos.
+
+## Capturas de pantalla (`capturas/`)
+Cuando se pide revisar visualmente lo construido, las capturas van a `capturas/` con nombres que se expliquen solos (`11-player-fin-de-bloque-calentamiento.png`).
+- **`capturas/` está en `.gitignore` y ahí se queda.** El repo es **público**.
+- **Siempre con datos de DEMO sembrados**, nunca con los datos reales: proyectos, leads, bitácora e historial no deben acabar en una imagen.
+- Se generan con Chrome headless por `puppeteer-core` desde el scratchpad (fuera del repo, para no meter dependencias al `package.json`).
 
 ## IMPORTANTE — caché del service worker
 La estrategia es **red primero** para los archivos propios, así que con internet la app instalada suele traer lo último al abrir. Aun así, **siempre incrementa `const CACHE = "mi-turno-vN"` al siguiente número** en cualquier cambio de HTML/CSS/JS: es lo que invalida la caché vieja, refresca la lista de precache y garantiza que el dispositivo no siga sirviendo una versión anterior en modo offline. Si el iPhone sigue mostrando algo viejo: cerrar por completo y reabrir; si persiste, quitar de la pantalla de inicio y volver a agregar (limpia el caché del SW).
@@ -225,6 +277,7 @@ Dos detalles del harness: el stub de elemento necesita `getContext()` para los `
 
 Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
+Para las rutinas por bloques: que una rutina plana migre a un único bloque `principal` sin pérdidas y de forma idempotente, que el importador acepte los dos formatos, que exportar y reimportar conserve bloques/tipos/peso corporal, que un ejercicio por tiempo registre duración y su record sea el aguante más largo, que uno de peso corporal **nunca** reporte record de peso, y que una fecha futura se rechace.
 Para estos arreglos: que un total de leads **nunca** junte dos unidades, que un entreno con fecha pasada caiga en el día correcto y alimente PRs/historial/estadísticas/hábito, que una fecha futura se recorte, y que editar o borrar una sesión de foco persista.
 Para Negocio: que restaurar una acción hecha la devuelva y pregunte al pisar otra, que las claves de periodo semanal y mensual sean correctas en el cambio de año, que dos números con unidades distintas **nunca** se sumen, que una idea se capture y persista, que una sesión de foco sobreviva un segundo plano simulado (mover `startedAt` hacia atrás) y registre la duración correcta, que la revisión escriba en el domingo correcto tanto desde domingo como desde lunes, que crear/editar/borrar un proyecto o un lead persista en `mt_biz`, que `mt_biz` sobreviva un ciclo exportar → borrar todo → restaurar (con `leads` y `done` dentro), que un `mt_hoyOrder` viejo sin la clave `biz` siga valiendo, que avanzar de etapa mueva `stageAt`, que el conteo semanal no cuente lo del domingo anterior, y que Hoy se pinte con cero proyectos, con cero leads y con varios de ambos.
 El gesto de deslizar **no** se prueba en el harness (vive en `reorder.js`, que arranca la app): se verifica en el navegador despachando `PointerEvent`s reales sobre `#app`.

@@ -1,12 +1,50 @@
 {
   "name": "Push A (ejemplo)",
   "days": ["lunes", "jueves"],
-  "exercises": [
-    { "name": "Press banca", "sets": 4, "reps": "8-10", "rest": 120, "weight": "60 kg", "note": "Baja controlado, pausa abajo" },
-    { "name": "Press inclinado con mancuerna", "sets": 3, "reps": "10-12", "rest": 90 },
-    { "name": "Press militar de pie", "sets": 3, "reps": "8-10", "rest": 120 },
-    { "name": "Elevaciones laterales", "sets": 4, "reps": "12-15", "rest": 60 },
-    { "name": "Fondos en paralelas", "sets": 3, "reps": "10", "rest": 90, "weight": "cuerpo" },
-    { "name": "Extensión de tríceps en polea", "sets": 3, "reps": "12-15", "rest": 60 }
+  "blocks": [
+    {
+      "name": "Calentamiento",
+      "kind": "calentamiento",
+      "exercises": [
+        { "name": "Movilidad de hombro", "sets": 1, "type": "tiempo", "seconds": 180, "rest": 0, "note": "Sin prisa" },
+        { "name": "Series de aproximacion", "sets": 2, "reps": "12", "rest": 45, "weight": "barra" }
+      ]
+    },
+    {
+      "name": "Push",
+      "kind": "principal",
+      "exercises": [
+        { "name": "Press banca", "sets": 4, "reps": "8-10", "rest": 120, "weight": "60 kg", "note": "Baja controlado, pausa abajo" },
+        { "name": "Press inclinado con mancuerna", "sets": 3, "reps": "10-12", "rest": 90 },
+        { "name": "Press militar de pie", "sets": 3, "reps": "8-10", "rest": 120 },
+        { "name": "Elevaciones laterales", "sets": 4, "reps": "12-15", "rest": 60 },
+        { "name": "Fondos en paralelas", "sets": 3, "reps": "10", "rest": 90, "bodyweight": true },
+        { "name": "Extension de triceps en polea", "sets": 3, "reps": "12-15", "rest": 60 }
+      ]
+    },
+    {
+      "name": "Abdomen",
+      "kind": "extra",
+      "exercises": [
+        { "name": "Plancha", "sets": 3, "type": "tiempo", "seconds": 45, "rest": 45 },
+        { "name": "Elevacion de piernas colgado", "sets": 3, "reps": "12", "rest": 60, "bodyweight": true }
+      ]
+    },
+    {
+      "name": "Cuello",
+      "kind": "extra",
+      "exercises": [
+        { "name": "Flexion de cuello", "sets": 2, "reps": "15", "rest": 30, "bodyweight": true },
+        { "name": "Extension de cuello", "sets": 2, "reps": "15", "rest": 30, "bodyweight": true }
+      ]
+    },
+    {
+      "name": "Enfriamiento",
+      "kind": "enfriamiento",
+      "exercises": [
+        { "name": "Estiramiento de pectoral", "sets": 2, "type": "tiempo", "seconds": 30, "rest": 15 },
+        { "name": "Respiracion", "sets": 1, "type": "tiempo", "seconds": 120, "rest": 0 }
+      ]
+    }
   ]
 }

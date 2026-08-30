@@ -1,34 +1,103 @@
 {
-  "_comment": "EJEMPLO de rutina dividida (Push/Pull/Legs). Edítalo o impórtalo desde Ajustes -> Rutinas de gym -> Importar JSON. Ver Guia_Rutinas_Gym.pdf.",
+  "_comment": "EJEMPLO de rutina dividida (Push/Pull/Legs) en el formato nuevo por bloques. Editalo o importalo desde Workouts -> Rutinas de fuerza -> Importar JSON. Ver RUTINAS-como-importar-json.md.",
   "routines": [
     {
       "name": "Push",
       "days": ["lunes", "jueves"],
-      "exercises": [
-        { "name": "Press de pecho", "sets": 4, "reps": "8-10", "rest": 120, "weight": "", "note": "Pesado. Deja 1-2 reps en reserva." },
-        { "name": "Press de hombro", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
-        { "name": "Elevaciones laterales", "sets": 4, "reps": "12-15", "rest": 45, "weight": "", "note": "" },
-        { "name": "Extensión de tríceps en polea", "sets": 3, "reps": "12-15", "rest": 60, "weight": "", "note": "" }
+      "blocks": [
+        {
+          "name": "Calentamiento",
+          "kind": "calentamiento",
+          "exercises": [
+            { "name": "Movilidad de hombro", "sets": 1, "type": "tiempo", "seconds": 180, "rest": 0 },
+            { "name": "Series de aproximacion", "sets": 2, "reps": "12", "rest": 45 }
+          ]
+        },
+        {
+          "name": "Push",
+          "kind": "principal",
+          "exercises": [
+            { "name": "Press de pecho", "sets": 4, "reps": "8-10", "rest": 120, "note": "Pesado. Deja 1-2 reps en reserva." },
+            { "name": "Press de hombro", "sets": 3, "reps": "10-12", "rest": 90 },
+            { "name": "Elevaciones laterales", "sets": 4, "reps": "12-15", "rest": 45 },
+            { "name": "Extension de triceps en polea", "sets": 3, "reps": "12-15", "rest": 60 }
+          ]
+        },
+        {
+          "name": "Abdomen",
+          "kind": "extra",
+          "exercises": [
+            { "name": "Plancha", "sets": 3, "type": "tiempo", "seconds": 45, "rest": 45 }
+          ]
+        },
+        {
+          "name": "Enfriamiento",
+          "kind": "enfriamiento",
+          "exercises": [
+            { "name": "Estiramiento de pectoral", "sets": 2, "type": "tiempo", "seconds": 30, "rest": 15 }
+          ]
+        }
       ]
     },
     {
       "name": "Pull",
       "days": ["martes", "viernes"],
-      "exercises": [
-        { "name": "Dominadas", "sets": 4, "reps": "6-10", "rest": 120, "weight": "cuerpo", "note": "Asistidas si hace falta." },
-        { "name": "Remo", "sets": 4, "reps": "8-12", "rest": 90, "weight": "", "note": "Tira con los codos." },
-        { "name": "Jalón al pecho", "sets": 3, "reps": "10-12", "rest": 90, "weight": "", "note": "" },
-        { "name": "Curl de bíceps", "sets": 3, "reps": "10-12", "rest": 60, "weight": "", "note": "" }
+      "blocks": [
+        {
+          "name": "Calentamiento",
+          "kind": "calentamiento",
+          "exercises": [
+            { "name": "Colgarse de la barra", "sets": 2, "type": "tiempo", "seconds": 30, "rest": 30 }
+          ]
+        },
+        {
+          "name": "Pull",
+          "kind": "principal",
+          "exercises": [
+            { "name": "Dominadas", "sets": 4, "reps": "6-10", "rest": 120, "bodyweight": true, "note": "Asistidas si hace falta." },
+            { "name": "Remo", "sets": 4, "reps": "8-12", "rest": 90, "note": "Tira con los codos." },
+            { "name": "Jalon al pecho", "sets": 3, "reps": "10-12", "rest": 90 },
+            { "name": "Curl de biceps", "sets": 3, "reps": "10-12", "rest": 60 }
+          ]
+        },
+        {
+          "name": "Cuello",
+          "kind": "extra",
+          "exercises": [
+            { "name": "Flexion de cuello", "sets": 2, "reps": "15", "rest": 30, "bodyweight": true },
+            { "name": "Extension de cuello", "sets": 2, "reps": "15", "rest": 30, "bodyweight": true }
+          ]
+        }
       ]
     },
     {
       "name": "Legs",
-      "days": ["miércoles", "sábado"],
-      "exercises": [
-        { "name": "Sentadilla", "sets": 4, "reps": "8-10", "rest": 150, "weight": "", "note": "" },
-        { "name": "Peso muerto rumano", "sets": 3, "reps": "10-12", "rest": 120, "weight": "", "note": "Bisagra de cadera, lumbar neutra." },
-        { "name": "Prensa de pierna", "sets": 3, "reps": "10-12", "rest": 120, "weight": "", "note": "" },
-        { "name": "Elevación de talón", "sets": 4, "reps": "12-15", "rest": 45, "weight": "", "note": "Pausa 1 s arriba y abajo." }
+      "days": ["miercoles", "sabado"],
+      "blocks": [
+        {
+          "name": "Calentamiento",
+          "kind": "calentamiento",
+          "exercises": [
+            { "name": "Bicicleta suave", "sets": 1, "type": "tiempo", "seconds": 300, "rest": 0 }
+          ]
+        },
+        {
+          "name": "Legs",
+          "kind": "principal",
+          "exercises": [
+            { "name": "Sentadilla", "sets": 4, "reps": "8-10", "rest": 150 },
+            { "name": "Peso muerto rumano", "sets": 3, "reps": "10-12", "rest": 120, "note": "Bisagra de cadera, lumbar neutra." },
+            { "name": "Prensa de pierna", "sets": 3, "reps": "10-12", "rest": 120 },
+            { "name": "Elevacion de talon", "sets": 4, "reps": "12-15", "rest": 45, "note": "Pausa 1 s arriba y abajo." }
+          ]
+        },
+        {
+          "name": "Enfriamiento",
+          "kind": "enfriamiento",
+          "exercises": [
+            { "name": "Estiramiento de isquiotibiales", "sets": 2, "type": "tiempo", "seconds": 30, "rest": 15 }
+          ]
+        }
       ]
     }
   ]

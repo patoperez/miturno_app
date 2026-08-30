@@ -408,11 +408,16 @@ function exercisePR(idOrName) {
   }));
   return best;
 }
-/* Entradas del catálogo con al menos una serie con peso registrado. */
+/* Entradas del catálogo con algo que presumir: peso, tiempo o reps. Filtrar
+   solo por peso dejaba fuera a la plancha y a las dominadas, que SÍ tienen
+   record — el suyo es de otra medida. */
 function allLoggedExercises() {
   const ids = {};
   WORKOUTS.forEach(w => (w.sets || []).forEach(s => {
-    if (!s.weight || isNaN(parseFloat(s.weight))) return;
+    const tiene = (s.weight && !isNaN(parseFloat(s.weight)))
+      || (s.secs && !isNaN(parseInt(s.secs, 10)))
+      || (s.reps && !isNaN(parseInt(s.reps, 10)));
+    if (!tiene) return;
     const id = setExId(s); if (id) ids[id] = true;
   }));
   return (CFG.exercises || []).filter(e => ids[e.id]);
