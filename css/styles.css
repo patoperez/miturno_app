@@ -383,6 +383,14 @@ textarea::placeholder{color:var(--muted2);}
 .bizdue.hoy{color:var(--ingresos); border-color:rgba(16,185,129,.5); background:rgba(16,185,129,.10);}
 .bizdue.bizstale{border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.10);}
 
+/* Aviso de formulario: por qué no se guardó, donde el usuario está mirando. */
+.fmsg{font-size:13px; margin-top:10px; min-height:0;}
+.fmsg:empty{margin-top:0;}
+.ferr{color:var(--bad); font-weight:600;}
+/* Un botón que todavía no puede guardar no debe parecer que sí. Sigue siendo
+   tocable a propósito: al tocarlo explica qué falta. */
+.btn.p.off{opacity:.45;}
+
 /* ---------- Bloques de rutina ---------- */
 .blk{border:1px solid var(--line); border-radius:14px; padding:10px; margin-bottom:10px; background:var(--card2);}
 .blk-h{display:flex; align-items:center; gap:8px; padding:2px 4px 8px;}

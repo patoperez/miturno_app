@@ -47,8 +47,8 @@ function renderRoutineEditor() {
     return `<div class="blk">
       <div class="blk-h"><span class="blk-dot" style="background:${col}"></span>
         <div class="blk-t"><b>${esc(b.name)}</b><span>${esc(BLOCK_LABEL[blockKind(b.kind)])}</span></div>
-        <button class="note-btn" onclick="moveBlock(${bi},-1)" ${bi === 0 ? "disabled" : ""}>${icon("upload")}</button>
-        <button class="note-btn" onclick="moveBlock(${bi},1)" ${bi === _RT.blocks.length - 1 ? "disabled" : ""}>${icon("download")}</button>
+        <button class="note-btn" aria-label="Subir bloque" onclick="moveBlock(${bi},-1)" ${bi === 0 ? "disabled" : ""}>${icon("upload")}</button>
+        <button class="note-btn" aria-label="Bajar bloque" onclick="moveBlock(${bi},1)" ${bi === _RT.blocks.length - 1 ? "disabled" : ""}>${icon("download")}</button>
         <button class="note-btn" onclick="openBlockEdit(${bi})">${icon("edit")}</button></div>
       ${rows}
       <button class="addbtn" onclick="openExercise(${bi},-1)">${icon("plus")} Agregar ejercicio</button></div>`;
@@ -91,13 +91,33 @@ function saveBlock(bi) {
   else { _RT.blocks[bi].name = nm; _RT.blocks[bi].kind = _bkKind; }
   renderRoutineEditor();
 }
+/* Borrar un bloque con ejercicios dentro se llevaba el trabajo por delante
+   sin vuelta atrás. Ahora la salida segura —mudarlos a otro bloque— es la
+   opción principal, y destruirlos queda como la secundaria. */
 function delBlock(bi) {
   const b = _RT.blocks[bi]; if (!b) return;
   const n = (b.exercises || []).length;
   if (!n) { _RT.blocks.splice(bi, 1); return renderRoutineEditor(); }
-  sheet(`<h3>¿Borrar "${esc(b.name)}"?</h3><div class="mm">Se van con él ${n} ${n === 1 ? "ejercicio" : "ejercicios"}. Esto no se puede deshacer.</div>
-    <button class="btn p" style="background:var(--bad)" onclick="doDelBlock(${bi})">Sí, borrar</button>
+  const otros = _RT.blocks.map((x, j) => ({ x: x, j: j })).filter(o => o.j !== bi);
+  sheet(`<h3>¿Borrar "${esc(b.name)}"?</h3>
+    <div class="mm">Tiene ${n} ${n === 1 ? "ejercicio" : "ejercicios"}. Puedes mudarlos a otro bloque en vez de perderlos.</div>
+    ${otros.length ? `<div class="lbl">Mover ${n === 1 ? "el ejercicio" : "los " + n + " ejercicios"} a</div>`
+      + otros.map(o => `<div class="row" onclick="moveBlockExercises(${bi},${o.j})">
+          <span class="dotc" style="background:${BLOCK_COLOR[blockKind(o.x.kind)]}"></span>
+          <div class="body"><div class="name">${esc(o.x.name)}</div><div class="sub">${esc(BLOCK_LABEL[blockKind(o.x.kind)])} · ${(o.x.exercises || []).length} ${(o.x.exercises || []).length === 1 ? "ejercicio" : "ejercicios"}</div></div>
+          <span class="chev">${icon("chevright")}</span></div>`).join("")
+      : `<div class="empty" style="text-align:left;padding:2px 2px 8px">No hay otro bloque a dónde mudarlos.</div>`}
+    <button class="btn g" style="color:var(--bad)" onclick="doDelBlock(${bi})">Borrar el bloque y ${n === 1 ? "su ejercicio" : "sus " + n + " ejercicios"}</button>
     <button class="btn g" onclick="renderRoutineEditor()">Cancelar</button>`);
+}
+/* Muda los ejercicios al bloque destino y luego sí borra el vacío. */
+function moveBlockExercises(bi, bj) {
+  const from = _RT.blocks[bi], to = _RT.blocks[bj];
+  if (!from || !to) return renderRoutineEditor();
+  (from.exercises || []).forEach(e => to.exercises.push(e));
+  from.exercises = [];
+  _RT.blocks.splice(bi, 1);
+  renderRoutineEditor();
 }
 function doDelBlock(bi) { _RT.blocks.splice(bi, 1); renderRoutineEditor(); }
 /* Mover un ejercicio a otro bloque. */
@@ -155,13 +175,16 @@ function openExercise(bi, i) {
     <div class="row2"><div><div class="lbl">Descanso (seg)</div><input id="xRest" class="field" type="number" min="0" value="${e.rest}"></div>
       <div id="xWeightWrap" style="${_xBw ? "display:none" : ""}"><div class="lbl">Peso (opcional)</div><input id="xWeight" class="field" value="${esc(e.weight)}" placeholder="60 kg"></div></div>
     <div class="lbl">Nota (opcional)</div><input id="xNote" class="field" value="${esc(e.note)}" placeholder="tempo, técnica...">
+    ${formSlot("xMsg")}
     <button class="btn p" onclick="saveExercise(${bi},${i})">Guardar ejercicio</button><button class="btn g" onclick="renderRoutineEditor()">Cancelar</button>`);
 }
 function saveExercise(bi, i) {
   /* Todo nombre pasa por el catálogo: si ya existe (o es un alias), se reusa
      su id en vez de crear un ejercicio nuevo. El tipo y el peso corporal son
      de ESTA definición, no del catálogo: el catálogo no se fragmenta. */
-  const cat = findOrCreateExercise(document.getElementById("xName").value);
+  const nombre = (document.getElementById("xName").value || "").trim();
+  if (!nombre) return formError("xMsg", "Ponle nombre al ejercicio.");
+  const cat = findOrCreateExercise(nombre);
   const xs = _RT.blocks[bi].exercises;
   const secsEl = document.getElementById("xSecs");
   const ex = {
@@ -280,7 +303,10 @@ function getActiveWorkout() {
 }
 function savePlayerState() {
   if (!PLAYER) return;
-  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, workEnd: PLAYER.workEnd || null, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx, prs: PLAYER.prs || [], restNotified: !!PLAYER.restNotified }));
+  /* El plan se guarda con la sesión: si editas la rutina a media sesión, el
+     entreno en curso NO se mueve bajo tus pies. Se reconstruye solo si el
+     guardado viene de una versión anterior. */
+  store.set("mt_activeWorkout", JSON.stringify({ rid: PLAYER.r.id, plan: PLAYER.plan || [], ei: PLAYER.ei, si: PLAYER.si, phase: PLAYER.phase, log: PLAYER.log, elapsedBase: elapsed(), restEnd: PLAYER.restEnd || null, workEnd: PLAYER.workEnd || null, hechos: PLAYER.hechos == null ? null : PLAYER.hechos, lastIdx: PLAYER.lastIdx == null ? null : PLAYER.lastIdx, prs: PLAYER.prs || [], restNotified: !!PLAYER.restNotified }));
 }
 function clearActive() { store.set("mt_activeWorkout", ""); }
 
@@ -312,7 +338,8 @@ function beginWorkout(rid) {
 function resumeWorkout() {
   const a = getActiveWorkout(); if (!a) return render();
   const r = CFG.routines.find(x => x.id === a.rid); if (!r) { clearActive(); return render(); }
-  PLAYER = { r, plan: buildPlan(r), ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, workEnd: a.workEnd || null, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx, prs: a.prs || [], pr: null, restNotified: !!a.restNotified };
+  const plan = (Array.isArray(a.plan) && a.plan.length) ? a.plan : buildPlan(r);
+  PLAYER = { r, plan: plan, ei: a.ei, si: a.si, phase: a.phase, timer: null, start: Date.now(), elapsedBase: a.elapsedBase || 0, wake: null, log: a.log || [], restEnd: a.restEnd || null, workEnd: a.workEnd || null, hechos: a.hechos == null ? null : a.hechos, lastIdx: a.lastIdx == null ? (a.log ? a.log.length - 1 : null) : a.lastIdx, prs: a.prs || [], pr: null, restNotified: !!a.restNotified };
   if (PLAYER.ei >= PLAYER.plan.length) PLAYER.ei = Math.max(0, PLAYER.plan.length - 1);   // la rutina pudo cambiar
   // Si estaba descansando: continúa el conteo real; si ya venció mientras no estabas, suena la alarma.
   if (PLAYER.phase === "rest" || PLAYER.phase === "alarm") {
@@ -540,11 +567,13 @@ function renderPlayer() {
       ${ex.note ? `<div class="pl-note">${esc(ex.note)}</div>` : ""}</div>
     <div class="pl-actions"><div class="pl-restctl"><button onclick="stopWorkEarly()">${icon("pause")} Terminar ya</button></div></div>`;
   } else if (P.phase === "workalarm") {
-    body = `<div class="pl-mid"><div class="pl-restlbl">Tiempo terminado</div>
-      <div class="pl-timer alarm">0:00</div>
+    /* Si se cortó antes, se enseña lo que se va a registrar de verdad. */
+    const corto = (P.hechos != null && P.hechos > 0 && P.hechos < exSeconds(ex));
+    body = `<div class="pl-mid"><div class="pl-restlbl">${corto ? "Serie cortada" : "Tiempo terminado"}</div>
+      <div class="pl-timer${corto ? "" : " alarm"}">${corto ? fmtSecs(P.hechos) : "0:00"}</div>
       <div class="pl-next big">${esc(exName(curExId(ex), ex.name))}</div>
-      <div class="pl-next">Serie ${P.si} de ${ex.sets}</div></div>
-    <div class="pl-actions"><button class="pl-primary alarmbtn" onclick="finishWorkSet()">Registrar serie</button></div>`;
+      <div class="pl-next">Serie ${P.si} de ${ex.sets}${corto ? " · de " + fmtSecs(exSeconds(ex)) : ""}</div></div>
+    <div class="pl-actions"><button class="pl-primary${corto ? "" : " alarmbtn"}" onclick="finishWorkSet()">Registrar ${corto ? fmtSecs(P.hechos) : "serie"}</button></div>`;
   } else if (P.phase === "rest") {
     const s = P.log[P.lastIdx] || { weight: "", reps: "" };
     const bw = exIsBw(ex), isTime = exIsTime(ex);
@@ -662,16 +691,22 @@ function tick() {
 function startWork() {
   const P = PLAYER, ex = curEx(P);
   primeAudio();                       // el tap del usuario habilita el sonido
-  P.phase = "work"; P.workEnd = Date.now() + exSeconds(ex) * 1000; P.restNotified = false;
+  P.phase = "work"; P.workEnd = Date.now() + exSeconds(ex) * 1000; P.restNotified = false; P.hechos = null;
   clearInterval(P.timer); P.timer = setInterval(tick, 500); renderPlayer();
 }
 /* Terminó el intervalo: se anota la serie y sigue el descanso (o el cierre). */
 function finishWorkSet() {
   const P = PLAYER, ex = curEx(P);
   stopAlarm();
-  const hechos = P.workEnd ? Math.min(exSeconds(ex), exSeconds(ex) - workLeft()) : exSeconds(ex);
+  /* Lo que DE VERDAD aguantaste. `P.hechos` lo pone stopWorkEarly al cortar
+     antes de que suene; antes se calculaba aquí contra `workEnd` (que ya
+     estaba en null) y acababa registrando la duración completa: bajarse a
+     los 20 de 45 guardaba 45 y corrompía el historial en silencio. */
+  const hechos = (P.hechos != null && P.hechos > 0)
+    ? P.hechos
+    : (P.workEnd ? Math.min(exSeconds(ex), exSeconds(ex) - workLeft()) : exSeconds(ex));
   logCurrentSet(hechos > 0 ? hechos : exSeconds(ex));
-  P.workEnd = null;
+  P.workEnd = null; P.hechos = null;
   if (P.si >= ex.sets) { advanceAfterExercise(); return; }
   P.si++; P.phase = "rest"; P.restEnd = Date.now() + ex.rest * 1000; P.restNotified = false;
   clearInterval(P.timer); P.timer = setInterval(tick, 500); renderPlayer();
@@ -680,8 +715,10 @@ function finishWorkSet() {
 function stopWorkEarly() {
   const P = PLAYER, ex = curEx(P);
   clearInterval(P.timer); P.timer = null;
+  /* Se mide ANTES de limpiar workEnd: workLeft() depende de él. */
   const hechos = Math.max(1, exSeconds(ex) - workLeft());
-  P.phase = "workalarm"; P.workEnd = null; P.hechos = hechos; renderPlayer();
+  P.hechos = hechos; P.workEnd = null;
+  P.phase = "workalarm"; renderPlayer();
 }
 function addRest(s) {
   const P = PLAYER; if (!P.restEnd) return;
@@ -722,7 +759,7 @@ function advanceAfterExercise() {
   P.phase = (next.bi !== cur.bi) ? "blockdone" : "transition";
   renderPlayer();
 }
-function continueNext() { const P = PLAYER; P.ei++; P.si = 1; P.phase = "set"; P.pr = null; P.workEnd = null; renderPlayer(); }
+function continueNext() { const P = PLAYER; P.ei++; P.si = 1; P.phase = "set"; P.pr = null; P.workEnd = null; P.hechos = null; renderPlayer(); }
 function finishWorkout() {
   const P = PLAYER;
   const vol = P.log.reduce((a, s) => { const w = parseFloat(s.weight), r = parseInt(s.reps); return a + (isNaN(w) || isNaN(r) ? 0 : w * r); }, 0);
