@@ -1264,15 +1264,14 @@ function openRenameExercise(id) {
   const e = exById(id); if (!e) return;
   sheet(`<h3>Renombrar ejercicio</h3><div class="mm">El historial no se toca: se agrega por id, no por nombre. El nombre anterior queda como alias.</div>
     <div class="lbl">Nombre</div><input id="exNm" class="field" value="${esc(e.name)}">
-    ${formSlot("exMsg")}
     <button class="btn p" onclick="saveRenameExercise('${id}')">Guardar</button>
     <button class="btn g" onclick="openExerciseDetail('${id}')">Cancelar</button>`);
 }
 function saveRenameExercise(id) {
   const v = document.getElementById("exNm").value;
   const res = renameExercise(id, v);
-  if (res === "clash") return formError("exMsg", "Ya existe otro ejercicio con ese nombre. Únelos en vez de repetirlo.");
-  if (!res) return formError("exMsg", "Ponle un nombre.");
+  if (res === "clash") return formError("Ya existe otro ejercicio con ese nombre. Únelos en vez de repetirlo.");
+  if (!res) return formError("Ponle un nombre.");
   openExerciseDetail(id); render();
 }
 function openMergePick(id) {
@@ -1324,16 +1323,32 @@ function delWorkout(id) { WORKOUTS = WORKOUTS.filter(w => w.id !== id); saveWork
 let _sInt = null;
 /* ---------- Avisos de formulario ----------
    Un botón de guardar que no hace nada es el PEOR fallo posible: el usuario
-   culpa a la función ("la app no me deja") en vez de al campo que falta. Toda
-   guarda que aborte tiene que decir por qué, donde el usuario está mirando.
-   `formError` escribe en la ranura `.fmsg` de esa hoja y devuelve false para
-   poder hacer `return formError(...)` de una línea. */
-function formError(slotId, msg) {
-  const el = document.getElementById(slotId);
+   culpa a la función ("la app no me deja") en vez de al campo que falta.
+
+   Esto NO es una convención que haya que recordar. La ranura la pone `sheet()`
+   sola (ver `armSheet`), así que quien escribe una hoja no puede omitirla: no
+   es suya. Y todo botón principal pasa por `submitSheet`, que si el handler
+   aborta sin dejar rastro escribe un aviso genérico antes que dejar silencio.
+
+   Solo hay una hoja abierta a la vez, así que la ranura tiene UN id fijo y
+   `formError` no recibe a dónde escribir: no se puede apuntar al slot
+   equivocado ni olvidar el parámetro. Devuelve false para poder escribir
+   `return formError("...")` de una línea. */
+const FMSG_ID = "fmsg";
+const MSG_SIN_RAZON = "No se pudo guardar. Revisa que no falte ningún campo.";
+function formError(msg) {
+  const el = document.getElementById(FMSG_ID);
   if (el) el.innerHTML = `<span class="ferr">${esc(msg)}</span>`;
   return false;
 }
-function formSlot(id) { return `<div class="fmsg" id="${id}"></div>`; }
+function formErrorText() {
+  const el = document.getElementById(FMSG_ID);
+  return el ? String(el.innerHTML || "") : "";
+}
+function clearFormError() {
+  const el = document.getElementById(FMSG_ID);
+  if (el) el.innerHTML = "";
+}
 
 /* Nunca al futuro: no se registra lo que no ha pasado. Se RECHAZA en vez de
    recortar en silencio — escribir un entreno en el día equivocado es peor
@@ -1344,7 +1359,7 @@ function isFutureDate(d) { return !!d && d > today(); }
 /* Devuelve la fecha si es válida, o null si es futura/vacía. */
 function validPast(d) { return (!d || isFutureDate(d)) ? null : d; }
 const MSG_FUTURO = "Esa fecha aún no llega. Solo puedes registrar días que ya pasaron.";
-function futureDateMsg(elId) { return formError(elId, MSG_FUTURO); }
+function futureDateMsg() { return formError(MSG_FUTURO); }
 /* Marca el hábito de gym del día que sea. Un entreno registrado a
    posteriori tiene que contar igual que uno en vivo, y un día pasado está
    congelado: por eso hay que recalcularlo. */
@@ -1363,7 +1378,6 @@ function openLogSession(actId, dateStr) {
       <div><div class="lbl">Día</div><input id="sDate" class="field" type="date" max="${today()}" value="${dd}"></div></div>
     <div class="lbl">Intensidad</div><div class="scale">${[1,2,3,4,5,6,7,8,9,10].map(i => `<b onclick="pickIntensity(this,${i})">${i}</b>`).join("")}</div>
     <div class="lbl">Notas (opcional)</div><textarea id="sNote" placeholder="Cómo estuvo, técnicas, sparring..."></textarea>
-    ${formSlot("sMsg")}
     <button class="btn p" onclick="saveSession('${actId}','${dd}')">Guardar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function pickIntensity(el, i) { _sInt = i; document.querySelectorAll(".scale b").forEach(b => b.classList.remove("on")); el.classList.add("on"); }
@@ -1372,7 +1386,7 @@ function saveSession(actId, dd) {
   const dur = parseInt(document.getElementById("sDur").value) || 0;
   const el = document.getElementById("sDate");
   const d = validPast((el && el.value) || dd);
-  if (!d) { futureDateMsg("sMsg"); return; }
+  if (!d) { futureDateMsg(); return; }
   WORKOUTS.push({ id: uid("w"), date: d, activityId: actId, type: "class", name: a.name, duration: dur, intensity: _sInt, notes: document.getElementById("sNote").value.trim() });
   _sInt = null; saveWorkouts(); markGymHabit(d); closeModal(); render();
 }
@@ -1430,6 +1444,9 @@ function renderManualWorkout() {
   /* Sin series el botón se ve apagado: nunca debe parecer que funciona
      cuando no puede. Sigue siendo tocable para que explique por qué. */
   const vacio = !_MW.sets.length;
+  /* El aviso viaja en el estado para sobrevivir al re-render, y se CONSUME
+     al pintarlo: si no, se quedaria pegado al cambiar el dia o la rutina. */
+  const err = _MW.err; _MW.err = "";
   sheet(`<h3>Registrar entreno</h3><div class="mm">Para el entreno que hiciste pero no registraste.</div>
     <div class="row2"><div><div class="lbl">Día</div><input class="field" type="date" max="${today()}" value="${_MW.date}" onchange="mwSetDate(this.value)"></div>
       <div><div class="lbl">Duración (min)</div><input id="mwDur" class="field" type="number" inputmode="numeric" min="0" value="${esc(_MW.dur)}" placeholder="60" onchange="_MW.dur=this.value"></div></div>
@@ -1438,9 +1455,8 @@ function renderManualWorkout() {
       ${CFG.routines.map(x => `<div class="chip ${_MW.routineId === x.id ? "on" : ""}" style="${_MW.routineId === x.id ? "background:var(--cuerpo);border-color:var(--cuerpo);color:#fff" : ""}" onclick="mwPickRoutine('${x.id}')">${esc(x.name)}</div>`).join("")}</div>
     <div class="lbl">Series (${_MW.sets.length})</div>${filas}
     <button class="addbtn" onclick="openMwSet()">${icon("plus")} Agregar series</button>
-    <div class="fmsg" id="mwMsg">${_MW.err ? `<span class="ferr">${esc(_MW.err)}</span>` : ""}</div>
     <button class="btn p${vacio ? " off" : ""}" onclick="saveManualWorkout()">Guardar entreno</button>
-    <button class="btn g" onclick="closeModal()">Cancelar</button>`);
+    <button class="btn g" onclick="closeModal()">Cancelar</button>`, err);
 }
 /* Agregar varias series iguales de un jalón: 4×8 a 60 kg es una sola alta. */
 function openMwSet() {
@@ -1455,14 +1471,13 @@ function openMwSet() {
       <div><div class="lbl">Reps</div><input id="mwR" class="field" inputmode="numeric" placeholder="8"></div></div>
     <div class="lbl">Segundos (si es por tiempo)</div><input id="mwS" class="field" inputmode="numeric" placeholder="—">
     <div class="lbl">¿Cuántas series iguales?</div><input id="mwN" class="field" type="number" inputmode="numeric" min="1" value="1">
-    ${formSlot("mwSetMsg")}
     <button class="btn p" onclick="addMwSet()">Agregar</button>
     <button class="btn g" onclick="renderManualWorkout()">Cancelar</button>`);
   const el = document.getElementById("mwEx"); if (el) el.focus();
 }
 function addMwSet() {
   const nm = (document.getElementById("mwEx").value || "").trim();
-  if (!nm) return formError("mwSetMsg", "Escribe el nombre del ejercicio.");
+  if (!nm) return formError("Escribe el nombre del ejercicio.");
   const cat = findOrCreateExercise(nm);   // mismo catálogo que una sesión en vivo
   const w = (document.getElementById("mwW").value || "").trim();
   const reps = (document.getElementById("mwR").value || "").trim();
@@ -1508,7 +1523,6 @@ function openEditActivity(id) {
     <div class="lbl">Tipo</div><div class="seg small"><button class="${it.type === "strength" ? "on" : ""}" onclick="pickAType('strength',this)">Fuerza (rutinas)</button><button class="${it.type === "class" ? "on" : ""}" onclick="pickAType('class',this)">Clase / sesión</button></div>
     <div class="lbl">Color</div><div class="swatches" id="aColors">${PALETTE.map(c => `<span class="sw ${c === it.color ? "on" : ""}" style="background:${c}" onclick="pickAColor('${c}')"></span>`).join("")}</div>
     <div class="lbl">Ícono</div><div class="iconpick" id="aIcons">${ACT_ICONS.map(nm => `<span class="ip ${nm === it.icon ? "on" : ""}" data-i="${nm}" onclick="pickAIcon('${nm}')" style="${nm === it.icon ? `color:${it.color};border-color:${it.color}` : ""}">${icon(nm)}</span>`).join("")}</div>
-    ${formSlot("aMsg")}
     <button class="btn p" onclick="saveActivity('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delActivity('${id}')" style="color:var(--bad)">Borrar actividad</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
@@ -1517,7 +1531,7 @@ function pickAColor(c) { _aColor = c; document.querySelectorAll("#aColors .sw").
 function pickAIcon(nm) { _aIcon = nm; document.querySelectorAll("#aIcons .ip").forEach(s => { s.classList.remove("on"); s.style.color = ""; s.style.borderColor = ""; }); const el = document.querySelector(`#aIcons .ip[data-i="${nm}"]`); if (el) { el.classList.add("on"); el.style.color = _aColor; el.style.borderColor = _aColor; } }
 function saveActivity(id) {
   const name = document.getElementById("aName").value.trim();
-  if (!name) return formError("aMsg", "Ponle nombre a la actividad.");
+  if (!name) return formError("Ponle nombre a la actividad.");
   if (id) Object.assign(getAct(id), { name, type: _aType, icon: _aIcon, color: _aColor });
   else CFG.activities.push({ id: uid("act"), name, type: _aType, icon: _aIcon, color: _aColor });
   saveCfg(); closeModal(); render();
@@ -1609,7 +1623,49 @@ function delTask(id) { TASKS = TASKS.filter(x => x.id !== id); saveTasks(); rend
 /* ---------- Modales ---------- */
 const modal = document.getElementById("modal");
 function closeModal() { modal.innerHTML = ""; }
-function sheet(inner) { modal.innerHTML = `<div class="ov" onclick="if(event.target===this)closeModal()"><div class="sheet">${inner}</div></div>`; }
+/* `sheet(inner, msg)` — `msg` es un aviso pendiente, para las hojas que se
+   repintan solas y tienen que sobrevivir al re-render (alta manual de entreno).
+   El autor pasa SOLO el contenido: la ranura y el enrutado de los botones los
+   pone `armSheet`, así que no hay nada que recordar. */
+function sheet(inner, msg) { modal.innerHTML = `<div class="ov" onclick="if(event.target===this)closeModal()"><div class="sheet">${armSheet(inner, msg)}</div></div>`; }
+
+/* Convierte el contenido de una hoja en una hoja con guarda:
+   1. Mete la ranura de aviso JUSTO ENCIMA del primer botón principal (donde
+      el usuario ya está mirando), o del primer botón que haya.
+   2. Enruta cada botón principal por `submitSheet`, que garantiza que un
+      handler no pueda abortar en silencio.
+   3. Le quita `disabled` a los botones principales: un botón apagado
+      (`.btn.p.off`) tiene que seguir siendo tocable para poder explicar qué
+      falta. Un `disabled` de verdad no puede decir por qué, que es justo el
+      problema que todo esto resuelve. */
+function armSheet(inner, msg) {
+  const html = String(inner).replace(/<button class="btn p([^"]*)"([^>]*)>/g, (m, extra, attrs) => {
+    const oc = /onclick="([^"]*)"/.exec(attrs);
+    if (!oc || oc[1].indexOf("submitSheet(") === 0) return m;
+    /* Se le quita `disabled` venga donde venga: un boton principal apagado
+       tiene que seguir siendo tocable para poder explicar que falta. */
+    const limpio = attrs
+      .replace(/\sdisabled(?==|\s|$)/g, " ")
+      .replace(/onclick="[^"]*"/, `onclick="submitSheet(function(){return ${oc[1]}})"`);
+    return `<button class="btn p${extra}"${limpio}>`;
+  });
+  const slot = `<div class="fmsg" id="${FMSG_ID}">${msg ? `<span class="ferr">${esc(msg)}</span>` : ""}</div>`;
+  let at = html.indexOf(`<button class="btn p`);
+  if (at < 0) at = html.indexOf(`<button class="btn `);
+  return at < 0 ? html + slot : html.slice(0, at) + slot + html.slice(at);
+}
+
+/* La red de seguridad. Si después de tocar el botón la hoja quedó EXACTAMENTE
+   igual y nadie escribió un aviso, el handler abortó en silencio: eso es el
+   bug que mató la confianza en "Guardar". Guardar de verdad cierra la hoja,
+   y repintarse también la cambia, así que no hay falsos positivos. */
+function submitSheet(fn) {
+  clearFormError();
+  const antes = modal.innerHTML;
+  const r = fn();
+  if (modal.innerHTML === antes && !formErrorText()) formError(MSG_SIN_RAZON);
+  return r;
+}
 
 let _emo = null;
 function openNote(d, hid) {
@@ -1633,7 +1689,6 @@ function openTask(prefill) {
       <input type="date" id="tdate" class="field" style="width:auto;padding:8px 10px" value="${_taskDate}" onchange="pickDateInput(this.value)"></div>
     <div class="lbl">Hora (opcional)</div><input id="ttime" class="field" placeholder="9:15 am">
     <div class="lbl">¿Conectada a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(null)}</div>
-    ${formSlot("tMsg")}
     <button class="btn p" onclick="saveTask()">Agregar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
   highlightDate();
 }
@@ -1643,7 +1698,7 @@ function highlightDate() { document.querySelectorAll("#dchips .chip").forEach(c 
 function idnChips(sel) { return CFG.identities.map(i => `<div class="chip" data-id="${i.id}" onclick="pickIdn(this,'${i.id}')" style="${sel === i.id ? `background:${i.raw};color:#fff;border-color:${i.raw}` : ""}">${esc(i.label)}</div>`).join(""); }
 function pickIdn(el, id) { _tidn = _tidn === id ? null : id; document.querySelectorAll("#pickidn .chip").forEach(c => { c.style.background = ""; c.style.color = ""; c.style.borderColor = ""; }); if (_tidn) { el.style.background = getIdn(id).raw; el.style.color = "#fff"; el.style.borderColor = getIdn(id).raw; } }
 function saveTask() { const text = document.getElementById("ttxt").value.trim();
-  if (!text) return formError("tMsg", "Escribe la tarea antes de agregarla."); TASKS.push({ id: uid("t"), text, time: document.getElementById("ttime").value.trim(), idn: _tidn, done: false, date: _taskDate || today() }); _tidn = null; saveTasks(); closeModal(); render(); }
+  if (!text) return formError("Escribe la tarea antes de agregarla."); TASKS.push({ id: uid("t"), text, time: document.getElementById("ttime").value.trim(), idn: _tidn, done: false, date: _taskDate || today() }); _tidn = null; saveTasks(); closeModal(); render(); }
 
 /* ---------- Fotos por meta (vision board, en IndexedDB) ---------- */
 let _photoDB = null;
@@ -1811,7 +1866,6 @@ function openEditIdentity(id) {
     <div class="lbl">Ícono</div><div class="iconpick" id="eIcons">${ICON_CHOICES.map(nm => `<span class="ip ${nm === it.icon ? "on" : ""}" data-i="${nm}" onclick="pickIcon('${nm}')" style="${nm === it.icon ? `color:${it.raw};border-color:${it.raw}` : ""}">${icon(nm)}</span>`).join("")}</div>
     <div class="lbl">Mi para qué</div><textarea id="eWhy" placeholder="¿Por qué importa?">${esc(it.why)}</textarea>
     <div class="lbl">Frases (una por línea)</div><textarea id="eQuotes" placeholder="Aún no somos quien queremos llegar a ser">${esc((it.quotes || []).join("\n"))}</textarea>
-    ${formSlot("eMsg")}
     <button class="btn p" onclick="saveIdentity('${editing ? id : ""}')">${editing ? "Guardar" : "Crear meta"}</button>
     ${editing ? `<button class="btn g" onclick="delIdentity('${id}')" style="color:var(--bad)">Borrar meta</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
@@ -1820,7 +1874,7 @@ function pickIcon(nm) { _eIcon = nm; document.querySelectorAll("#eIcons .ip").fo
 function rgbToHex(rgb) { const m = rgb.match(/\d+/g); if (!m) return rgb; return "#" + m.slice(0, 3).map(x => (+x).toString(16).padStart(2, "0")).join(""); }
 function saveIdentity(id) {
   const label = document.getElementById("eName").value.trim();
-  if (!label) return formError("eMsg", "Ponle nombre a la meta.");
+  if (!label) return formError("Ponle nombre a la meta.");
   const why = document.getElementById("eWhy").value.trim(), quotes = document.getElementById("eQuotes").value.split("\n").map(s => s.trim()).filter(Boolean);
   if (id) Object.assign(CFG.identities.find(i => i.id === id), { label, why, quotes, raw: _eColor, icon: _eIcon });
   else CFG.identities.push({ id: uid("id"), label, why, quotes, raw: _eColor, icon: _eIcon });
@@ -1836,7 +1890,6 @@ function itemEditor(kind, id) {
     <div class="lbl">Nombre</div><input id="iName" class="field" value="${esc(it.name)}" placeholder="${kind === "habit" ? "Ej: Leer 20 minutos" : "Ej: Sin azúcar"}">
     ${kind === "habit" ? `<div class="lbl">Hora (opcional · ordena tu lista de hoy)</div><input id="iTime" class="field" type="time" value="${esc(it.time || "")}">` : ""}
     ${CFG.identities.length ? `<div class="lbl">¿Conectado a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(it.idn)}</div>` : ""}
-    ${formSlot("iMsg")}
     <button class="btn p" onclick="saveItem('${kind}','${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delItem('${kind}','${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
@@ -1844,7 +1897,7 @@ function openEditHabit(id) { itemEditor("habit", id); }
 function openEditCommit(id) { itemEditor("commit", id); }
 function saveItem(kind, id) {
   const name = document.getElementById("iName").value.trim();
-  if (!name) return formError("iMsg", "Ponle nombre antes de guardar.");
+  if (!name) return formError("Ponle nombre antes de guardar.");
   freezePastDays();
   const tEl = document.getElementById("iTime"), time = tEl ? tEl.value : "";
   const list = kind === "habit" ? CFG.habits : CFG.commitments;
@@ -1863,13 +1916,12 @@ function openEditMetric(id) {
     <div class="lbl">Unidad (opcional)</div><input id="qUnit" class="field" value="${esc(it.unit || "")}" placeholder="kg · h · min">
     <div class="lbl">Meta (opcional · solo se muestra como referencia)</div><input id="qTarget" class="field" value="${esc(it.target || "")}" placeholder="Ej: 6.5">
     ${CFG.identities.length ? `<div class="lbl">¿Conectada a una meta? (opcional)</div><div class="chips" id="pickidn" style="padding:0">${idnChips(it.idn)}</div>` : ""}
-    ${formSlot("qMsg")}
     <button class="btn p" onclick="saveMetric('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delMetric('${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function saveMetric(id) {
   const name = document.getElementById("qName").value.trim();
-  if (!name) return formError("qMsg", "Ponle nombre a la métrica.");
+  if (!name) return formError("Ponle nombre a la métrica.");
   const unit = document.getElementById("qUnit").value.trim();
   const target = document.getElementById("qTarget").value.trim();
   if (id) { const it = CFG.metrics.find(x => x.id === id); it.name = name; it.unit = unit; it.target = target; it.idn = _tidn; }
@@ -1884,11 +1936,10 @@ function openEditMeal(id) {
   sheet(`<h3>${editing ? "Editar comida" : "Nueva comida"}</h3>
     <div class="lbl">Nombre</div><input id="mName" class="field" value="${esc(it.name)}" placeholder="Desayuno">
     <div class="lbl">Menú / descripción (opcional)</div><textarea id="mDesc" placeholder="Qué lleva esta comida">${esc(it.desc)}</textarea>
-    ${formSlot("mMsg")}
     <button class="btn p" onclick="saveMeal('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delMeal('${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
-function saveMeal(id) { const name = document.getElementById("mName").value.trim(); if (!name) return formError("mMsg", "Ponle nombre a la comida."); freezePastDays(); const desc = document.getElementById("mDesc").value.trim(); if (id) { const it = CFG.meals.menu.find(m => m.id === id); it.name = name; it.desc = desc; } else CFG.meals.menu.push({ id: uid("m"), name, desc }); saveCfg(); closeModal(); render(); }
+function saveMeal(id) { const name = document.getElementById("mName").value.trim(); if (!name) return formError("Ponle nombre a la comida."); freezePastDays(); const desc = document.getElementById("mDesc").value.trim(); if (id) { const it = CFG.meals.menu.find(m => m.id === id); it.name = name; it.desc = desc; } else CFG.meals.menu.push({ id: uid("m"), name, desc }); saveCfg(); closeModal(); render(); }
 function delMeal(id) { freezePastDays(); CFG.meals.menu = CFG.meals.menu.filter(m => m.id !== id); saveCfg(); closeModal(); render(); }
 
 /* ---------- Comidas (fichas + opciones) ---------- */
@@ -1906,14 +1957,13 @@ function openEditCat(id) {
     <div class="lbl">Fichas por día</div><input id="cQuota" class="field" type="number" min="1" value="${it.quota}">
     <div class="lbl">Color</div><div class="swatches" id="eColors">${PALETTE.map(c => `<span class="sw ${c === it.color ? "on" : ""}" style="background:${c}" onclick="pickColorCat('${c}')"></span>`).join("")}</div>
     ${foodList}
-    ${formSlot("cMsg")}
     <button class="btn p" onclick="saveCat('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delCat('${id}')" style="color:var(--bad)">Borrar categoría</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function pickColorCat(c) { _eColor = c; document.querySelectorAll("#eColors .sw").forEach(s => s.classList.toggle("on", rgbToHex(s.style.background) === c.toLowerCase())); }
 function saveCat(id) {
   const name = document.getElementById("cName").value.trim();
-  if (!name) return formError("cMsg", "Ponle nombre a la categoría.");
+  if (!name) return formError("Ponle nombre a la categoría.");
   freezePastDays();
   const quota = Math.max(1, parseInt(document.getElementById("cQuota").value) || 1);
   if (id) { const it = CFG.meals.fichas.categories.find(c => c.id === id); it.name = name; it.quota = quota; it.color = _eColor; }
@@ -1928,13 +1978,12 @@ function openEditFood(cid, idx) {
     <div class="lbl">Alimento</div><input id="fFood" class="field" value="${esc(it.food)}" placeholder="Pechuga de pollo">
     <div class="lbl">Cantidad</div><input id="fAmt" class="field" value="${esc(it.amount)}" placeholder="175 g">
     <div class="lbl">Nota (opcional)</div><input id="fNote" class="field" value="${esc(it.note)}" placeholder="Magra">
-    ${formSlot("fMsg")}
     <button class="btn p" onclick="saveFood('${cid}',${editing ? idx : -1})">${editing ? "Guardar" : "Agregar"}</button>
     ${editing ? `<button class="btn g" onclick="delFood('${cid}',${idx})" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="openEditCat('${cid}')">Volver</button>`);
 }
 function saveFood(cid, idx) {
   const food = document.getElementById("fFood").value.trim();
-  if (!food) return formError("fMsg", "Escribe el alimento.");
+  if (!food) return formError("Escribe el alimento.");
   const o = { food, amount: document.getElementById("fAmt").value.trim(), note: document.getElementById("fNote").value.trim() };
   const list = CFG.meals.fichas.catalog[cid] || (CFG.meals.fichas.catalog[cid] = []);
   if (idx >= 0) list[idx] = o; else list.push(o);
@@ -1945,11 +1994,10 @@ function openEditInneg(id) {
   const editing = !!id, it = editing ? CFG.meals.fichas.innegociables.find(n => n.id === id) : { name: "" };
   sheet(`<h3>${editing ? "Editar innegociable" : "Nuevo innegociable"}</h3>
     <div class="lbl">Nombre</div><input id="nName" class="field" value="${esc(it.name)}" placeholder="Kefir (1 taza)">
-    ${formSlot("nMsg")}
     <button class="btn p" onclick="saveInneg('${editing ? id : ""}')">${editing ? "Guardar" : "Crear"}</button>
     ${editing ? `<button class="btn g" onclick="delInneg('${id}')" style="color:var(--bad)">Borrar</button>` : ""}<button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
-function saveInneg(id) { const name = document.getElementById("nName").value.trim(); if (!name) return formError("nMsg", "Ponle nombre al innegociable."); if (id) CFG.meals.fichas.innegociables.find(n => n.id === id).name = name; else CFG.meals.fichas.innegociables.push({ id: uid("in"), name }); saveCfg(); closeModal(); render(); }
+function saveInneg(id) { const name = document.getElementById("nName").value.trim(); if (!name) return formError("Ponle nombre al innegociable."); if (id) CFG.meals.fichas.innegociables.find(n => n.id === id).name = name; else CFG.meals.fichas.innegociables.push({ id: uid("in"), name }); saveCfg(); closeModal(); render(); }
 function delInneg(id) { CFG.meals.fichas.innegociables = CFG.meals.fichas.innegociables.filter(n => n.id !== id); saveCfg(); closeModal(); render(); }
 
 /* ---------- Comidas por JSON ---------- */
@@ -1958,12 +2006,10 @@ function delInneg(id) { CFG.meals.fichas.innegociables = CFG.meals.fichas.innego
 function openImportPlan() {
   sheet(`<h3>Importar plan (JSON)</h3><div class="mm">Reemplaza tus metas, hábitos, compromisos y métricas. No toca tu historial, tus comidas ni tus rutinas.</div>
     <textarea id="pjson" placeholder='{"identities":[{"label":"Mi cuerpo","icon":"cuerpo","color":"#FF5A3C"}],"habits":[{"name":"Despertar 5:15","time":"05:15","idn":"Mi cuerpo"}],"commitments":[{"name":"Sin azúcar"}],"metrics":[{"name":"Peso","unit":"kg"}]}' style="min-height:170px;font-family:monospace;font-size:12px"></textarea>
-    <div id="pmsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="importPlan()">Importar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function importPlan() {
-  const msg = document.getElementById("pmsg");
-  let d; try { d = JSON.parse(document.getElementById("pjson").value); } catch (e) { msg.innerHTML = `<span style="color:var(--bad)">JSON inválido: ${esc(e.message)}</span>`; return; }
+  let d; try { d = JSON.parse(document.getElementById("pjson").value); } catch (e) { return formError("JSON inválido: " + e.message); }
   const ids = [], byName = {};
   (d.identities || []).forEach(i => {
     const id = uid("idn");
@@ -1976,7 +2022,7 @@ function importPlan() {
   const habits = (d.habits || []).map(h => ({ id: uid("habit"), name: (h.name || "Hábito").toString(), time: (h.time || "").toString(), idn: link(h.idn) }));
   const commitments = (d.commitments || []).map(c => ({ id: uid("commit"), name: (c.name || (typeof c === "string" ? c : "Compromiso")).toString(), idn: link(c.idn) }));
   const metrics = (d.metrics || []).map(m => ({ id: uid("q"), name: (m.name || "Métrica").toString(), unit: (m.unit || "").toString(), target: (m.target || "").toString(), idn: link(m.idn) }));
-  if (!ids.length && !habits.length && !commitments.length && !metrics.length) { msg.innerHTML = `<span style="color:var(--bad)">No encontré identities, habits, commitments ni metrics.</span>`; return; }
+  if (!ids.length && !habits.length && !commitments.length && !metrics.length) return formError("No encontré identities, habits, commitments ni metrics.");
   freezePastDays();
   if (ids.length) CFG.identities = ids;
   if (d.habits) CFG.habits = habits;
@@ -2000,12 +2046,10 @@ function exportPlan() {
 function openImportMeals() {
   sheet(`<h3>Importar comidas (JSON)</h3><div class="mm">Reemplaza tu configuración de comidas. Revisa la guía (COMIDAS-como-importar-json).</div>
     <textarea id="mjson" placeholder='{"system":"fichas","fichas":{"categories":[{"name":"Proteína","quota":3,"foods":[{"food":"Pollo","amount":"175 g"}]}]}}' style="min-height:170px;font-family:monospace;font-size:12px"></textarea>
-    <div id="mmsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="importMeals()">Importar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function importMeals() {
-  const msg = document.getElementById("mmsg");
-  let d; try { d = JSON.parse(document.getElementById("mjson").value); } catch (e) { msg.innerHTML = `<span style="color:var(--bad)">JSON inválido: ${esc(e.message)}</span>`; return; }
+  let d; try { d = JSON.parse(document.getElementById("mjson").value); } catch (e) { return formError("JSON inválido: " + e.message); }
   const meals = { menu: [], fichas: { categories: [], catalog: {}, innegociables: [] } };
   (d.menu || []).forEach(m => meals.menu.push({ id: uid("m"), name: (m.name || "Comida").toString(), desc: (m.desc || "").toString() }));
   const f = d.fichas || {};
@@ -2060,14 +2104,15 @@ function openImportData() {
     <input type="file" accept="application/json,.json" id="bkfile" class="field" onchange="importFromFile(this)">
     <div class="lbl">O pega el contenido del respaldo</div>
     <textarea id="bkpaste" placeholder="{ &quot;app&quot;: &quot;mi-turno&quot;, ... }" style="min-height:120px;font-family:monospace;font-size:12px"></textarea>
-    <div id="bkmsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="importFromPaste()">Restaurar</button>
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
+/* Escribe el porqué en la ranura de la hoja abierta (la de restaurar) y
+   devuelve false. Restaurar un respaldo inválido no puede quedar en silencio:
+   es el sitio donde el usuario más necesita saber qué pasó. */
 function applyBackup(text) {
-  const msg = document.getElementById("bkmsg");
-  let o; try { o = JSON.parse(text); } catch (e) { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Archivo inválido: ${esc(e.message)}</span>`; return false; }
-  if (!o || o.app !== "mi-turno" || !o.data) { if (msg) msg.innerHTML = `<span style="color:var(--bad)">Este no es un respaldo de Mi Turno.</span>`; return false; }
+  let o; try { o = JSON.parse(text); } catch (e) { formError("Archivo inválido: " + e.message); return false; }
+  if (!o || o.app !== "mi-turno" || !o.data) { formError("Este no es un respaldo de Mi Turno."); return false; }
   BACKUP_KEYS.forEach(k => { if (k in o.data) store.set(k, o.data[k]); });
   return true;
 }
@@ -2081,7 +2126,7 @@ function refreshState() {
   buildNav(); render();
 }
 function reloadApp() { try { location.reload(); } catch (e) { refreshState(); } }
-function importFromPaste() { if (applyBackup(document.getElementById("bkpaste").value)) reloadApp(); }
+function importFromPaste() { return applyBackup(document.getElementById("bkpaste").value) ? reloadApp() : false; }
 function importFromFile(input) {
   const f = input.files && input.files[0]; if (!f) return;
   const r = new FileReader();
@@ -2253,14 +2298,13 @@ function openBizMetric(id) {
     <div class="row2"><div><div class="lbl">Unidad</div><input id="bnUnit" class="field" value="${esc(v.unit)}" placeholder="MXN, USD, clientes..."></div>
       <div><div class="lbl">Meta (opcional)</div><input id="bnTarget" class="field" type="number" inputmode="decimal" step="any" value="${esc(v.target === 0 || v.target ? v.target : "")}"></div></div>
     <div class="lbl">Cada cuánto</div><div class="seg small" id="bmPeriod">${BIZ_PERIODS.map(p => `<button data-p="${p}" class="${p === v.period ? "on" : ""}" onclick="pickBmPeriod('${p}')">${cap(p === "semana" ? "semanal" : "mensual")}</button>`).join("")}</div>
-    ${formSlot("bnMsg")}
     <button class="btn p" onclick="saveBizMetric('${editing ? id : ""}')">${editing ? "Guardar" : "Crear número"}</button>
     ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelBizMetric('${id}')">Borrar número</button>` : ""}
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 function saveBizMetric(id) {
   const name = document.getElementById("bnName").value.trim();
-  if (!name) return formError("bnMsg", "Ponle nombre al número (ingreso, clientes, ahorro...).");
+  if (!name) return formError("Ponle nombre al número (ingreso, clientes, ahorro...).");
   const t = (document.getElementById("bnTarget").value || "").trim();
   const data = {
     name: name, unit: document.getElementById("bnUnit").value.trim(),
@@ -2591,7 +2635,6 @@ function openLead(id) {
       <div class="chip ${!_leadProject ? "on" : ""}" data-p="" onclick="pickLeadProject('')" style="${!_leadProject ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">Ninguno</div>
       ${proyectos.map(p => `<div class="chip ${_leadProject === p.id ? "on" : ""}" data-p="${p.id}" onclick="pickLeadProject('${p.id}')" style="${_leadProject === p.id ? "background:var(--ingresos);border-color:var(--ingresos);color:#0E0F13" : ""}">${esc(p.name)}</div>`).join("")}</div>` : ""}
     <div class="lbl">Notas</div><textarea id="lgNotes" placeholder="Qué necesita, qué le dijiste, qué sigue...">${esc(v.notes)}</textarea>
-    ${formSlot("lgMsg")}
     <button class="btn p" onclick="saveLead('${editing ? id : ""}')">${editing ? "Guardar" : "Crear prospecto"}</button>
     ${editing && isOpenStage(v.stage) ? `<button class="btn g" onclick="advanceLead('${id}')">${icon("chevright")} Avanzar a ${cap(nextStage(v.stage))}</button>` : ""}
     ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelLead('${id}')">Borrar prospecto</button>` : ""}
@@ -2599,7 +2642,7 @@ function openLead(id) {
 }
 function saveLead(id) {
   const name = document.getElementById("lgName").value.trim();
-  if (!name) return formError("lgMsg", "Ponle nombre al prospecto: es lo único obligatorio.");
+  if (!name) return formError("Ponle nombre al prospecto: es lo único obligatorio.");
   const raw = document.getElementById("lgValue").value.trim();
   const data = {
     name,
@@ -2825,7 +2868,6 @@ function openFocusManual(projectId) {
     <div class="row2"><div><div class="lbl">Minutos</div><input id="fmMin" class="field" type="number" inputmode="numeric" min="1" placeholder="60"></div>
       <div><div class="lbl">Día</div><input id="fmDate" class="field" type="date" value="${today()}"></div></div>
     <div class="lbl">Nota (opcional)</div><input id="fmNote" class="field" placeholder="En qué se fue el tiempo">
-    ${formSlot("fmMsg")}
     <button class="btn p" onclick="saveFocusManual()">Guardar</button>
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
@@ -2840,8 +2882,8 @@ function pickFocusProj(pid) {
 }
 function saveFocusManual() {
   const min = parseInt(document.getElementById("fmMin").value, 10);
-  if (!_focusProj) return formError("fmMsg", "Elige a qué proyecto se fue el tiempo.");
-  if (!min || min <= 0) return formError("fmMsg", "Escribe cuántos minutos, como número mayor que cero.");
+  if (!_focusProj) return formError("Elige a qué proyecto se fue el tiempo.");
+  if (!min || min <= 0) return formError("Escribe cuántos minutos, como número mayor que cero.");
   BIZ.focus.push({
     id: uid("fs"), date: document.getElementById("fmDate").value || today(),
     projectId: _focusProj, seconds: min * 60, note: document.getElementById("fmNote").value.trim()
@@ -2857,7 +2899,6 @@ function openFocusEdit(id) {
     <div class="row2"><div><div class="lbl">Minutos</div><input id="feMin" class="field" type="number" inputmode="numeric" min="1" value="${Math.max(1, Math.round((f.seconds || 0) / 60))}"></div>
       <div><div class="lbl">Día</div><input id="feDate" class="field" type="date" max="${today()}" value="${esc(f.date)}"></div></div>
     <div class="lbl">Nota (opcional)</div><input id="feNote" class="field" value="${esc(f.note || "")}" placeholder="En qué se fue el tiempo">
-    ${formSlot("feMsg")}
     <button class="btn p" onclick="saveFocusEdit('${id}')">Guardar</button>
     <button class="btn g" style="color:var(--bad)" onclick="confirmDelFocus('${id}')">Borrar sesión</button>
     <button class="btn g" onclick="${p ? `openBizProject('${p.id}')` : "closeModal()"}">Cancelar</button>`);
@@ -2865,9 +2906,9 @@ function openFocusEdit(id) {
 function saveFocusEdit(id) {
   const f = BIZ.focus.find(x => x.id === id); if (!f) return;
   const min = parseInt(document.getElementById("feMin").value, 10);
-  if (!min || min <= 0) return formError("feMsg", "Escribe cuántos minutos, como número mayor que cero.");
+  if (!min || min <= 0) return formError("Escribe cuántos minutos, como número mayor que cero.");
   const d = validPast(document.getElementById("feDate").value || f.date);
-  if (!d) { futureDateMsg("feMsg"); return; }
+  if (!d) { futureDateMsg(); return; }
   f.seconds = min * 60;
   f.date = d;
   f.note = document.getElementById("feNote").value.trim();
@@ -2978,7 +3019,6 @@ function openBizProject(id) {
     <div class="lbl">¿Para cuándo? (opcional)</div><input id="bpDue" class="field" type="date" value="${esc(v.nextActionDue || "")}">
     ${editing ? focusSummaryBlock(id) : ""}
     ${editing ? doneHistoryBlock(id) : ""}
-    ${formSlot("bpMsg")}
     <button class="btn p" onclick="saveBizProject('${editing ? id : ""}')">${editing ? "Guardar" : "Crear proyecto"}</button>
     ${editing ? `<button class="btn g" style="color:var(--bad)" onclick="confirmDelProject('${id}')">Borrar proyecto</button>` : ""}
     <button class="btn g" onclick="closeModal()">Cancelar</button>`);
@@ -3033,7 +3073,7 @@ function doRestoreDone(doneId) {
 
 function saveBizProject(id) {
   const name = document.getElementById("bpName").value.trim();
-  if (!name) return formError("bpMsg", "Ponle nombre al proyecto: es lo único obligatorio.");
+  if (!name) return formError("Ponle nombre al proyecto: es lo único obligatorio.");
   const data = {
     name,
     color: _bizColor,

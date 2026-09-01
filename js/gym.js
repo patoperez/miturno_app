@@ -175,7 +175,6 @@ function openExercise(bi, i) {
     <div class="row2"><div><div class="lbl">Descanso (seg)</div><input id="xRest" class="field" type="number" min="0" value="${e.rest}"></div>
       <div id="xWeightWrap" style="${_xBw ? "display:none" : ""}"><div class="lbl">Peso (opcional)</div><input id="xWeight" class="field" value="${esc(e.weight)}" placeholder="60 kg"></div></div>
     <div class="lbl">Nota (opcional)</div><input id="xNote" class="field" value="${esc(e.note)}" placeholder="tempo, técnica...">
-    ${formSlot("xMsg")}
     <button class="btn p" onclick="saveExercise(${bi},${i})">Guardar ejercicio</button><button class="btn g" onclick="renderRoutineEditor()">Cancelar</button>`);
 }
 function saveExercise(bi, i) {
@@ -183,7 +182,7 @@ function saveExercise(bi, i) {
      su id en vez de crear un ejercicio nuevo. El tipo y el peso corporal son
      de ESTA definición, no del catálogo: el catálogo no se fragmenta. */
   const nombre = (document.getElementById("xName").value || "").trim();
-  if (!nombre) return formError("xMsg", "Ponle nombre al ejercicio.");
+  if (!nombre) return formError("Ponle nombre al ejercicio.");
   const cat = findOrCreateExercise(nombre);
   const xs = _RT.blocks[bi].exercises;
   const secsEl = document.getElementById("xSecs");
@@ -216,7 +215,6 @@ function delRoutine(id) { CFG.routines = CFG.routines.filter(r => r.id !== id); 
 function openImportJSON() {
   sheet(`<h3>Importar rutina (JSON)</h3><div class="mm">Pega el JSON de tu rutina. Acepta el formato nuevo (con bloques) y el viejo (lista plana), una rutina, varias, o {"routines":[...]}. Revisa RUTINAS-como-importar-json.md.</div>
     <textarea id="jsonIn" placeholder='{"name":"Push A","days":["lunes"],"blocks":[{"name":"Principal","kind":"principal","exercises":[{"name":"Press banca","sets":4,"reps":"8-10","rest":120}]}]}' style="min-height:160px;font-family:monospace;font-size:12px"></textarea>
-    <div id="jsonMsg" style="font-size:13px;margin-top:8px"></div>
     <button class="btn p" onclick="importJSON()">Importar</button><button class="btn g" onclick="closeModal()">Cancelar</button>`);
 }
 /* Un ejercicio importado. Cada nombre se resuelve contra el catálogo (nombre
@@ -263,11 +261,10 @@ function normalizeRoutine(o) {
   return base;
 }
 function importJSON() {
-  const msg = document.getElementById("jsonMsg");
-  let data; try { data = JSON.parse(document.getElementById("jsonIn").value); } catch (e) { msg.innerHTML = `<span style="color:var(--bad)">JSON inválido: ${esc(e.message)}</span>`; return; }
+  let data; try { data = JSON.parse(document.getElementById("jsonIn").value); } catch (e) { return formError("JSON inválido: " + e.message); }
   let arr = Array.isArray(data) ? data : (data && Array.isArray(data.routines) ? data.routines : [data]);
   const norm = arr.map(normalizeRoutine).filter(Boolean);
-  if (!norm.length) { msg.innerHTML = `<span style="color:var(--bad)">No encontré rutinas válidas. Cada rutina necesita "blocks" (formato nuevo) o "exercises" (formato viejo).</span>`; return; }
+  if (!norm.length) return formError('No encontré rutinas válidas. Cada rutina necesita "blocks" (formato nuevo) o "exercises" (formato viejo).');
   norm.forEach(r => CFG.routines.push(r)); saveCfg(); closeModal(); render();
 }
 function exportRoutine(id) {
