@@ -15,6 +15,7 @@
     "fn:list": "npx --yes supabase@2 functions list",
     "fn:logs": "npx --yes supabase@2 functions logs send-reminders",
     "secrets:list": "npx --yes supabase@2 secrets list",
-    "check": "node --check js/config.js && node --check js/app.js && node --check js/gym.js && node --check js/reorder.js && node --check js/sync.js && node --check sw.js"
+    "check": "node --check js/config.js && node --check js/app.js && node --check js/gym.js && node --check js/reorder.js && node --check js/sync.js && node --check sw.js",
+    "test": "npm run check && node tests/run.js"
   }
 }

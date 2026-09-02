@@ -1649,6 +1649,10 @@ function armSheet(inner, msg) {
       .replace(/onclick="[^"]*"/, `onclick="submitSheet(function(){return ${oc[1]}})"`);
     return `<button class="btn p${extra}"${limpio}>`;
   });
+  /* Armar dos veces no puede meter dos ranuras. Hoy solo `sheet()` llama
+     aqui, asi que no pasa — pero "hoy no pasa" es exactamente como entro
+     el bug original, y el enrutado de botones ya era idempotente. */
+  if (html.indexOf(`id="${FMSG_ID}"`) > -1) return html;
   const slot = `<div class="fmsg" id="${FMSG_ID}">${msg ? `<span class="ferr">${esc(msg)}</span>` : ""}</div>`;
   let at = html.indexOf(`<button class="btn p`);
   if (at < 0) at = html.indexOf(`<button class="btn `);

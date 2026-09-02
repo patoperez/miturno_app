@@ -289,11 +289,32 @@ Todo cambio de base de datos, Edge Function, secreto y cron se hace por CLI y qu
 Repo en GitHub (`patoperez/miturno_app`) conectado a **Netlify** (auto-deploy en cada push). Sitio estático, sin comando de build, output = raíz.
 
 ## Cómo verificar sin dispositivo
-No hay suite de tests. Para checar JS: `node --check js/<archivo>.js` (o `npm run check`, que los pasa todos). Para probar lógica, se usa un harness de Node que stubea `document`/`localStorage`/`window` y hace `eval` de los scripts concatenados (`config.js` + `app.js` + `gym.js`; **no** `reorder.js`, que arranca la app). `sync.js` es opcional en el harness: si se incluye, el stub necesita `document.addEventListener` y `documentElement.style.setProperty`.
 
-Dos detalles del harness: el stub de elemento necesita `getContext()` para los `<canvas>`, y como `eval` en modo suelto deja `let`/`const` en su propio ámbito, hay que cerrar el `eval` con `;Object.assign(global,{CFG,LOG,...})` para poder inspeccionar el estado desde las pruebas.
+```bash
+npm test
+```
 
-Casos que conviene cubrir siempre: arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
+Corre `npm run check` (el `node --check` de todos los JS) y después las suites de `tests/`. **Sale distinto de cero si algo falla**, así que sirve tal cual en un hook o en CI. Para una sola suite: `node tests/run.js hojas`.
+
+**Las pruebas viven en el repo, no en un scratchpad.** Durante diez sesiones cada arreglo llegó con pruebas que se evaporaban al terminar la sesión: el harness se reescribía desde cero cada vez y nunca lo revisó nadie dos veces. Ahora `tests/` está versionado y es la memoria acumulada de esos bugs.
+
+### Cómo está armado
+- **`tests/harness.js`** — el único harness. Stubea `document`/`localStorage`/`window` y hace `eval` de `config.js` + `app.js` + `gym.js` concatenados. **Lo importan todas las suites**: los huecos del stub se arreglan una vez, aquí, no una vez por suite. La raíz del repo sale de `__dirname`, así que `npm test` corre igual desde cualquier directorio.
+  - **No** carga `reorder.js`: ese arranca la app de verdad, y ahí vive el gesto de deslizar, que necesita eventos de puntero reales y **se verifica en el navegador**.
+  - **No** carga `sync.js`: `app.js` lo llama siempre con guardas `typeof … === "function"`, así que su ausencia es parte de lo que se prueba.
+  - Como `eval` en modo suelto deja `let`/`const` en su propio ámbito, el `eval` cierra con `;Object.assign(globalThis,{CFG,LOG,…})`. **Si agregas una función que una prueba necesita, va en esa lista.** Un nombre que ya no exista tira `ReferenceError` al cargar, que es lo correcto: avisa de una vez.
+  - `document.getElementById` **materializa y memoiza** un elemento para cualquier id. Es lo que permite escribir en un campo sin montar un DOM. Dos consecuencias que ya han mordido: un parche al DOM hecho después de pintar **no** se ve en `modal.innerHTML` (son objetos distintos), y los stubs **sobreviven entre pruebas del mismo archivo** — limpia antes de revisar (`clearFormError()`, o `resetEls()`) o un aviso viejo te dará un falso positivo.
+- **`tests/run.js`** — el corredor. Cada suite corre en **su propio proceso**, a propósito: todas hacen `eval` de la app y mutan estado global, así que compartir proceso las contaminaría y las volvería dependientes del orden.
+- **`tests/*.test.js`** — las suites. El corredor las descubre solas por el sufijo: **agregar un archivo es agregar una suite**, sin registrarlo en ningún lado.
+- **Sin dependencias nuevas.** `package.json` sigue siendo el archivo de atajos de Supabase; el corredor usa solo `child_process`.
+
+### Reglas
+- **Un cambio de comportamiento ACTUALIZA su prueba; no la borra.** Si una prueba estorba, o el comportamiento nuevo está mal, o la prueba describe algo que ya no aplica y hay que reemplazar la aserción por la nueva verdad — nunca quitar la cobertura. Cada prueba de `tests/` es un bug que ya pasó una vez.
+- **Los datos de las pruebas son de DEMO.** El repo es público: nada de proyectos, leads, bitácora ni historial reales.
+- **Al arreglar un bug, la prueba va primero en el commit del arreglo**, no "después".
+- Si una guarda no se ha visto fallar, no está probada: está presente. Para comprobarlo se rompe a propósito y se confirma que la suite se pone roja (prueba de mutación). Las 17 guardas de la lista de abajo se verificaron así.
+
+Los casos cubiertos hoy (cada uno es un bug que ya ocurrió): arranque en frío con `localStorage` vacío (la semilla es vacía, así que los estados vacíos importan), migración desde una config vieja sin `metrics` ni `time`, que las métricas no alteren `maxPts()`, que editar un día **congelado** actualice `LOG[d].pts` y que `pointsFor` lo refleje, que **borrar hábitos y luego editar un día pasado no encoja su `max`** (la regresión del 150%), que ningún día pinte más de 100%, y que no se pueda navegar al futuro.
 Para el catálogo de ejercicios: que la migración lo construya desde rutinas **e** historial sin perder un solo entreno ni serie, que correrla dos veces no cambie nada, que importar una rutina cuyos nombres solo difieren en acentos/mayúsculas/espacios reuse el **mismo** `exId`, que `exercisePR` devuelva un único record tras fusionar dos grafías, y que renombrar conserve el historial completo.
 Para las rutinas por bloques: que una rutina plana migre a un único bloque `principal` sin pérdidas y de forma idempotente, que el importador acepte los dos formatos, que exportar y reimportar conserve bloques/tipos/peso corporal, que un ejercicio por tiempo registre duración y su record sea el aguante más largo, que uno de peso corporal **nunca** reporte record de peso, y que una fecha futura se rechace.
 Para estos arreglos: que un total de leads **nunca** junte dos unidades, que un entreno con fecha pasada caiga en el día correcto y alimente PRs/historial/estadísticas/hábito, que una fecha futura se recorte, y que editar o borrar una sesión de foco persista.
