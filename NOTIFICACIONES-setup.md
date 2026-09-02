@@ -2,6 +2,8 @@
 
 Las notificaciones usan Web Push: la app se suscribe en tu iPhone y una función en tu Supabase las envía a la hora que elijas, aunque la app esté cerrada. Todo el código ya está listo; faltan unos pasos de configuración en Supabase (una sola vez).
 
+> **Si trabajas desde la terminal:** los pasos 1, 2 y 4 ya están versionados en el repo. La tabla y el cron son migraciones (`npm run db:push`) y la función se sube con `npm run fn:deploy`. Los pasos manuales de abajo son el equivalente por el panel, para montar una instancia nueva. Ver `CLAUDE.md`, "Supabase desde la terminal".
+
 ## Paso 1 — Crear la tabla de suscripciones (SQL)
 
 Supabase → **SQL Editor → New query**, pega y **Run**:

@@ -2,6 +2,8 @@
 
 La app ya trae tu URL y clave pública. Solo faltan dos cosas que se hacen una vez en el panel de Supabase.
 
+> **Si trabajas desde la terminal:** este repo ya versiona el esquema en `supabase/migrations/`, así que el Paso 1 se resuelve con `npm run db:push` (revisa antes con `npm run db:push:dry`). Es la vía preferida: es idempotente y queda como código. Los pasos de abajo son el equivalente manual, para montar una instancia nueva desde el panel. Ver `CLAUDE.md`, "Supabase desde la terminal".
+
 ## Paso 1 — Crear la tabla (SQL)
 
 En Supabase: **SQL Editor → New query**, pega esto y dale **Run**:

@@ -1,6 +1,6 @@
 # Cómo configurar tus comidas con JSON
 
-En **Mi Turno** eliges UN solo sistema de comidas (lo pones en **Ajustes → Comidas → Sistema**):
+En **Mi Turno** eliges UN solo sistema de comidas (lo pones en **Ajustes → Comidas → Sistema**; Ajustes se abre con el **engrane del header**, arriba a la derecha):
 
 - **Menú**: tus comidas del día (Desayuno, Comida, Cena...) con su descripción. Marcas cada una como hecha.
 - **Fichas**: porciones intercambiables por categoría (Proteína, Carbo, Grasa...). Cada ficha equivale a una opción de comida. Marcas fichas hasta llenar tu cuota del día.

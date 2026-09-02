@@ -35,7 +35,7 @@ Ahora se abre a pantalla completa, con su ícono propio, sin barra de Safari. Fu
 
 ## Notas
 
-- **Para actualizarla más adelante** (cuando le agreguemos cosas), solo vuelves a arrastrar la carpeta en Netlify Drop sobre el mismo sitio, o lo automatizamos con GitHub.
-- **Tus datos** viven en el teléfono por ahora. Por eso el siguiente paso será un **respaldo** y luego **Supabase** para la nube y las notificaciones.
-- **Notificaciones:** iOS solo las permite en apps instaladas (agregadas a la pantalla de inicio). Cuando montemos Supabase, te pedirá permiso de notificaciones; acéptalo.
+- **Para actualizarla más adelante**, vuelves a arrastrar la carpeta en Netlify Drop sobre el mismo sitio. (El sitio de Pato ya no se actualiza así: está conectado a GitHub y Netlify publica solo en cada push.)
+- **Tus datos** viven en el teléfono. Desde **Ajustes → Datos y respaldo** puedes exportar un respaldo, y con una cuenta de Supabase se sincronizan entre dispositivos — ver `SUPABASE-setup.md`.
+- **Notificaciones:** iOS solo las permite en apps instaladas (agregadas a la pantalla de inicio) y necesitas iOS 16.4 o mayor. Se activan en **Ajustes → Notificaciones**, que te pedirá permiso; acéptalo. La configuración del servidor está en `NOTIFICACIONES-setup.md`.
 - Ábrela **una vez desde el ícono** después de instalar, para que se guarde offline.
